@@ -1,0 +1,1 @@
+"""Frontend tables initialization"""
