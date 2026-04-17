@@ -5,6 +5,7 @@ from typing import List, Optional
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.models.bill import Bill, BillStatus
+from bson import ObjectId
 import logging
 
 logger = logging.getLogger(__name__)
@@ -221,3 +222,100 @@ class BillController:
         """Count bills matching filters"""
         query = filters or {}
         return await self.collection.count_documents(query)
+
+    async def apply_payment_to_bills(
+        self,
+        *,
+        amount: float,
+        party_name: str,
+        bill_ids: Optional[List[str]] = None,
+        invoice_nos: Optional[List[str]] = None,
+        payment_id: Optional[str] = None,
+    ) -> dict:
+        """Allocate a payment amount across selected bills and update bill status/amounts."""
+        remaining_amount = float(amount or 0.0)
+        if remaining_amount <= 0:
+            return {
+                'applied_amount': 0.0,
+                'remaining_amount': 0.0,
+                'allocations': [],
+            }
+
+        query = {'party_name': party_name}
+        or_filters = []
+
+        if bill_ids:
+            object_ids = []
+            for bill_id in bill_ids:
+                try:
+                    object_ids.append(ObjectId(bill_id))
+                except Exception:
+                    continue
+            if object_ids:
+                or_filters.append({'_id': {'$in': object_ids}})
+
+        if invoice_nos:
+            safe_invoice_nos = [str(inv).strip() for inv in invoice_nos if str(inv).strip()]
+            if safe_invoice_nos:
+                or_filters.append({'invoice_no': {'$in': safe_invoice_nos}})
+
+        if or_filters:
+            query['$or'] = or_filters
+
+        bills = await self.collection.find(query).sort([('invoice_date', 1), ('_id', 1)]).to_list(length=None)
+
+        allocations = []
+        applied_total = 0.0
+
+        for bill in bills:
+            if remaining_amount <= 0:
+                break
+
+            grand_total = float(bill.get('grand_total') or 0.0)
+            paid_amount = float(bill.get('paid_amount') or 0.0)
+            due_amount = max(0.0, grand_total - paid_amount)
+            if due_amount <= 0:
+                continue
+
+            applied = min(due_amount, remaining_amount)
+            new_paid = paid_amount + applied
+            new_remaining = max(0.0, grand_total - new_paid)
+
+            if new_remaining == 0:
+                new_status = BillStatus.PAID
+            elif new_paid > 0:
+                new_status = BillStatus.PARTIAL
+            else:
+                new_status = BillStatus.UNPAID
+
+            update_doc = {
+                '$set': {
+                    'paid_amount': new_paid,
+                    'remaining_amount': new_remaining,
+                    'status': new_status,
+                    'updated_at': datetime.utcnow(),
+                }
+            }
+
+            if payment_id:
+                existing_matches = bill.get('matched_payment_ids') or []
+                if payment_id not in existing_matches:
+                    update_doc['$set']['matched_payment_ids'] = [*existing_matches, payment_id]
+
+            await self.collection.update_one({'_id': bill['_id']}, update_doc)
+
+            allocations.append({
+                'bill_id': str(bill['_id']),
+                'invoice_no': bill.get('invoice_no'),
+                'allocated_amount': applied,
+                'status': new_status,
+            })
+
+            applied_total += applied
+            remaining_amount -= applied
+
+        return {
+            'applied_amount': applied_total,
+            'remaining_amount': max(0.0, remaining_amount),
+            'allocations': allocations,
+        }

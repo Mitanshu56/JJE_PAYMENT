@@ -29,6 +29,7 @@ export const paymentsAPI = {
   },
   getById: (paymentId) => api.get(`/api/payments/${paymentId}`),
   getByParty: (partyName) => api.get(`/api/payments/party/${partyName}`),
+  createManual: (payload) => api.post('/api/payments/manual', payload),
   delete: (paymentId) => api.delete(`/api/payments/${paymentId}`),
 }
 

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react'
-import { dashboardAPI } from '../services/api'
+import { dashboardAPI, billsAPI } from '../services/api'
 import SummaryCards from '../components/dashboard/SummaryCards'
 import PartyTable from '../components/tables/PartyTable'
 import BillsTable from '../components/tables/BillsTable'
+import ManagePayments from '../components/payments/ManagePayments'
 import Charts from '../components/charts/Charts'
 import '../components/dashboard/Dashboard.css'
 
@@ -10,6 +11,7 @@ export default function Dashboard() {
   const [summary, setSummary] = useState(null)
   const [partySummary, setPartySummary] = useState(null)
   const [monthlySummary, setMonthlySummary] = useState(null)
+  const [allBills, setAllBills] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [activeTab, setActiveTab] = useState('summary')
@@ -21,10 +23,11 @@ export default function Dashboard() {
   const loadDashboardData = async () => {
     try {
       setLoading(true)
-      const [summaryRes, partyRes, monthlyRes] = await Promise.allSettled([
+      const [summaryRes, partyRes, monthlyRes, billsRes] = await Promise.allSettled([
         dashboardAPI.getSummary(),
         dashboardAPI.getPartySummary(),
         dashboardAPI.getMonthlySummary(),
+        billsAPI.getAll(0, 1000),
       ])
 
       const errors = []
@@ -45,6 +48,12 @@ export default function Dashboard() {
         setMonthlySummary(monthlyRes.value.data.monthly_summary || [])
       } else {
         errors.push('monthly')
+      }
+
+      if (billsRes.status === 'fulfilled') {
+        setAllBills(billsRes.value.data.bills || [])
+      } else {
+        setAllBills([])
       }
 
       setError(errors.length ? `Failed to load: ${errors.join(', ')}` : null)
@@ -137,6 +146,16 @@ export default function Dashboard() {
             >
               Invoices
             </button>
+            <button
+              onClick={() => setActiveTab('manage-payments')}
+              className={`pb-3 px-4 font-medium border-b-2 transition ${
+                activeTab === 'manage-payments'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Manage Payment
+            </button>
           </div>
         </div>
 
@@ -146,10 +165,13 @@ export default function Dashboard() {
             <Charts monthlySummary={monthlySummary} />
           )}
           {activeTab === 'parties' && partySummary && (
-            <PartyTable parties={partySummary} />
+            <PartyTable parties={partySummary} bills={allBills} />
           )}
           {activeTab === 'invoices' && (
             <BillsTable />
+          )}
+          {activeTab === 'manage-payments' && (
+            <ManagePayments bills={allBills} onPaymentSaved={loadDashboardData} />
           )}
         </div>
       </div>
