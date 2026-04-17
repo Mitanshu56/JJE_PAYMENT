@@ -18,7 +18,7 @@ export default function Login({ onLoginSuccess }) {
 
     try {
       setLoading(true)
-      const res = await authAPI.login(username.trim(), password)
+      const res = await authAPI.login(username.trim(), password.trim())
       const token = res?.data?.token
       const loggedUser = res?.data?.username || username.trim()
       if (!token) {
