@@ -4,6 +4,7 @@ import SummaryCards from '../components/dashboard/SummaryCards'
 import PartyTable from '../components/tables/PartyTable'
 import BillsTable from '../components/tables/BillsTable'
 import ManagePayments from '../components/payments/ManagePayments'
+import StatementTab from '../components/statements/StatementTab'
 import Charts from '../components/charts/Charts'
 import '../components/dashboard/Dashboard.css'
 
@@ -156,6 +157,16 @@ export default function Dashboard() {
             >
               Manage Payment
             </button>
+            <button
+              onClick={() => setActiveTab('statement')}
+              className={`pb-3 px-4 font-medium border-b-2 transition ${
+                activeTab === 'statement'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Statement
+            </button>
           </div>
         </div>
 
@@ -172,6 +183,9 @@ export default function Dashboard() {
           )}
           {activeTab === 'manage-payments' && (
             <ManagePayments bills={allBills} onPaymentSaved={loadDashboardData} />
+          )}
+          {activeTab === 'statement' && (
+            <StatementTab />
           )}
         </div>
       </div>

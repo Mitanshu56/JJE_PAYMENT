@@ -49,7 +49,29 @@ export const uploadAPI = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  uploadStatementPdf: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post('/api/upload/statements/pdf', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
   getHistory: (limit = 50) => api.get(`/api/upload/history?limit=${limit}`),
+}
+
+export const statementsAPI = {
+  getMonthly: (filters = {}) => {
+    const params = new URLSearchParams()
+
+    if (filters.fiscalYear) params.append('fiscal_year', filters.fiscalYear)
+    if (filters.year) params.append('year', filters.year)
+    if (filters.month) params.append('month', filters.month)
+    if (filters.page) params.append('page', filters.page)
+    if (filters.pageSize) params.append('page_size', filters.pageSize)
+
+    const query = params.toString()
+    return api.get(`/api/upload/statements/monthly${query ? `?${query}` : ''}`)
+  },
 }
 
 // Dashboard API
