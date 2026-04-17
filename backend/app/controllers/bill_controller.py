@@ -178,6 +178,10 @@ class BillController:
                 }
 
                 # Primary path: fast upsert by stable identity key.
+                upserted_id = None
+                modified_count = 0
+                matched_count = 0
+
                 try:
                     result = await self.collection.update_one(
                         {'invoice_key': invoice_key},
@@ -187,28 +191,40 @@ class BillController:
                         },
                         upsert=True
                     )
+                    upserted_id = result.upserted_id
+                    modified_count = result.modified_count
+                    matched_count = result.matched_count
                 except Exception as e:
                     # Handle E11000 duplicate key error by consolidating duplicates
                     if 'E11000' in str(e):
-                        logger.warning(f"E11000 duplicate key for {invoice_key}, consolidating...")
+                        logger.warning(f"E11000 duplicate key for {invoice_key}, consolidating duplicates...")
+                        # Consolidate all duplicate records with this invoice_key
                         await self._consolidate_duplicate_keys(invoice_key)
-                        # Retry the upsert after consolidation
-                        result = await self.collection.update_one(
-                            {'invoice_key': invoice_key},
-                            {
-                                '$set': set_doc,
-                                '$setOnInsert': set_on_insert_doc,
-                            },
-                            upsert=True
-                        )
+
+                        # After consolidation, find the consolidated record and update it
+                        existing = await self.collection.find_one({'invoice_key': invoice_key})
+                        if existing:
+                            # Update the consolidated record
+                            result = await self.collection.update_one(
+                                {'_id': existing['_id']},
+                                {'$set': set_doc},
+                                upsert=False
+                            )
+                            modified_count = result.modified_count
+                            matched_count = result.matched_count
+                        else:
+                            # If no record found after consolidation, insert new one
+                            insert_doc = {**set_doc, **set_on_insert_doc}
+                            insert_result = await self.collection.insert_one(insert_doc)
+                            upserted_id = insert_result.inserted_id
                     else:
                         raise
 
-                if result.upserted_id:
+                if upserted_id:
                     # If this was inserted, we may have matched a stale-key duplicate case.
                     # Attempt to merge into an older legacy record and drop the just-inserted duplicate.
-                    legacy = await self._find_legacy_matching_bill(bill, exclude_id=result.upserted_id)
-                    if legacy and str(legacy.get('_id')) != str(result.upserted_id):
+                    legacy = await self._find_legacy_matching_bill(bill, exclude_id=upserted_id)
+                    if legacy and str(legacy.get('_id')) != str(upserted_id):
                         await self.collection.update_one(
                             {'_id': legacy['_id']},
                             {
@@ -217,14 +233,14 @@ class BillController:
                             },
                             upsert=False,
                         )
-                        await self.collection.delete_one({'_id': result.upserted_id})
+                        await self.collection.delete_one({'_id': upserted_id})
                         stats['updated_records'] += 1
                         continue
 
                     stats['new_records'] += 1
-                elif result.modified_count > 0:
+                elif modified_count > 0:
                     stats['updated_records'] += 1
-                elif result.matched_count > 0:
+                elif matched_count > 0:
                     stats['unchanged_records'] += 1
 
             logger.info(

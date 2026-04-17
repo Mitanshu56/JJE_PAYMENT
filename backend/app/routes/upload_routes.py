@@ -7,12 +7,13 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 import tempfile
 import os
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.database import get_db
 from app.utils.excel_parser import InvoiceParser, BankStatementParser
 from app.utils.pdf_statement_parser import PDFStatementParser
 from app.controllers.bill_controller import BillController
 from app.controllers.payment_controller import PaymentController
+from app.routes.payment_routes import reconcile_bills_from_payments
 import logging
 
 logger = logging.getLogger(__name__)
@@ -131,23 +132,105 @@ async def upload_invoices(file: UploadFile = File(...), db: AsyncIOMotorDatabase
             
             if not invoices:
                 raise HTTPException(status_code=400, detail="No valid invoices found in file")
+
+            bill_controller = BillController(db)
+
+            def _norm_date(value):
+                if value is None:
+                    return ''
+                if hasattr(value, 'strftime'):
+                    return value.strftime('%Y-%m-%d')
+                value_str = str(value).strip()
+                return value_str[:10] if value_str else ''
+
+            def _norm_num(value):
+                try:
+                    return round(float(value or 0.0), 2)
+                except Exception:
+                    return 0.0
+
+            # Build snapshot to report accurate log stats for refreshed uploads.
+            existing_bills = await db['bills'].find(
+                {},
+                {
+                    'invoice_key': 1,
+                    'invoice_date': 1,
+                    'net_amount': 1,
+                    'cgst': 1,
+                    'sgst': 1,
+                    'grand_total': 1,
+                }
+            ).to_list(length=100000)
+
+            existing_by_key = {
+                str(doc.get('invoice_key') or ''): doc
+                for doc in existing_bills
+                if doc.get('invoice_key')
+            }
+
+            log_new_records = 0
+            log_updated_records = 0
+            log_unchanged_records = 0
+            for invoice in invoices:
+                invoice_key = bill_controller._build_invoice_key(invoice)
+                existing = existing_by_key.get(invoice_key)
+                if not existing:
+                    log_new_records += 1
+                    continue
+
+                existing_signature = (
+                    _norm_date(existing.get('invoice_date')),
+                    _norm_num(existing.get('net_amount')),
+                    _norm_num(existing.get('cgst')),
+                    _norm_num(existing.get('sgst')),
+                    _norm_num(existing.get('grand_total')),
+                )
+                incoming_signature = (
+                    _norm_date(invoice.get('invoice_date')),
+                    _norm_num(invoice.get('net_amount')),
+                    _norm_num(invoice.get('cgst')),
+                    _norm_num(invoice.get('sgst')),
+                    _norm_num(invoice.get('grand_total')),
+                )
+
+                if incoming_signature == existing_signature:
+                    log_unchanged_records += 1
+                else:
+                    log_updated_records += 1
+
+            # Always treat invoice upload as the latest source of truth.
+            # Clear prior bills and stale payment-to-invoice links before re-import.
+            await db['bills'].delete_many({})
+            await db['payments'].update_many(
+                {},
+                {
+                    '$set': {
+                        'matched_invoice_nos': [],
+                    }
+                }
+            )
             
             # Store in database
-            bill_controller = BillController(db)
             import_stats = await bill_controller.create_bills_bulk(invoices, upload_batch_id=upload_batch_id)
+
+            # Rebuild bill totals/status from existing payments and saved allocations.
+            rematched_bills = 0
+            reconcile_summary = await reconcile_bills_from_payments(db)
+            rematched_bills = int(reconcile_summary.get('allocation_rows_applied') or 0)
+
             total_bills_after_upload = await db['bills'].count_documents({})
-            upload_time = datetime.utcnow()
+            upload_time = datetime.now(timezone.utc)
             
             # Log upload with accurate statistics
             await db['upload_logs'].insert_one({
                 'file_name': file.filename,
                 'file_type': 'invoice',
                 'total_in_file': import_stats['total_in_file'],
-                'new_records': import_stats['new_records'],
-                'updated_records': import_stats['updated_records'],
-                'unchanged_records': import_stats['unchanged_records'],
+                'new_records': log_new_records,
+                'updated_records': log_updated_records,
+                'unchanged_records': log_unchanged_records,
                 'skipped_records': import_stats['skipped_records'],
-                'total_processed': import_stats['new_records'] + import_stats['updated_records'],
+                'total_processed': log_new_records + log_updated_records,
                 'total_bills_after_upload': total_bills_after_upload,
                 'upload_batch_id': upload_batch_id,
                 'created_at': upload_time,
@@ -158,17 +241,19 @@ async def upload_invoices(file: UploadFile = File(...), db: AsyncIOMotorDatabase
             return {
                 'status': 'success',
                 'message': (
-                    f"Upload complete: {import_stats['new_records']} new, "
-                    f"{import_stats['updated_records']} updated, "
-                    f"{import_stats['unchanged_records']} unchanged"
+                    f"Upload complete: {log_new_records} new, "
+                    f"{log_updated_records} updated, "
+                    f"{log_unchanged_records} unchanged, "
+                    f"{rematched_bills} rematched"
                 ),
-                'invoices_count': import_stats['new_records'],
+                'invoices_count': log_new_records,
                 'import_summary': {
                     'total_in_file': import_stats['total_in_file'],
-                    'new_records': import_stats['new_records'],
-                    'updated_records': import_stats['updated_records'],
-                    'unchanged_records': import_stats['unchanged_records'],
+                    'new_records': log_new_records,
+                    'updated_records': log_updated_records,
+                    'unchanged_records': log_unchanged_records,
                     'skipped_records': import_stats['skipped_records'],
+                    'rematched_bills': rematched_bills,
                     'total_bills_after_upload': total_bills_after_upload,
                     'upload_batch_id': upload_batch_id,
                     'current_upload_at': upload_time,

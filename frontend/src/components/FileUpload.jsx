@@ -1,18 +1,30 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Upload, Check, AlertCircle } from 'lucide-react'
 import { uploadAPI } from '../services/api'
 
 export default function FileUpload({ onUploadComplete }) {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState(null)
-  const [uploadType, setUploadType] = useState('invoices')
   const [lastInvoiceUpload, setLastInvoiceUpload] = useState(null)
+  const ignoreNextResultRef = useRef(false)
 
   const formatDateTime = (value) => {
     if (!value) return '-'
-    const date = new Date(value)
+    const normalizedValue =
+      typeof value === 'string' && !/[zZ]|[+\-]\d\d:\d\d$/.test(value)
+        ? `${value}Z`
+        : value
+    const date = new Date(normalizedValue)
     if (Number.isNaN(date.getTime())) return '-'
-    return date.toLocaleString()
+    return date.toLocaleString('en-IN', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    })
   }
 
   const loadLastInvoiceUpload = async () => {
@@ -35,27 +47,27 @@ export default function FileUpload({ onUploadComplete }) {
     try {
       setLoading(true)
       setMessage(null)
+      ignoreNextResultRef.current = false
 
       let result
-      if (uploadType === 'invoices') {
-        result = await uploadAPI.uploadInvoices(file)
-      } else {
-        result = await uploadAPI.uploadBankStatement(file)
-      }
+      result = await uploadAPI.uploadInvoices(file)
 
       const summary = result?.data?.import_summary
-      const successText = summary
-        ? `Upload complete: ${summary.new_records} new, ${summary.updated_records} updated, ${summary.unchanged_records} unchanged. Uploaded at ${formatDateTime(summary.current_upload_at)}.`
-        : result.data.message
+      const newRecords = Number(summary?.new_records || 0)
+      const successText = newRecords > 0
+        ? `${newRecords} new record${newRecords === 1 ? '' : 's'} added successfully.`
+        : 'All things are up to date. Nothing to add.'
+
+      if (ignoreNextResultRef.current) return
 
       setMessage({
         type: 'success',
         text: successText,
       })
 
-      if (uploadType === 'invoices') {
-        await loadLastInvoiceUpload()
-      }
+      window.alert(successText)
+
+      await loadLastInvoiceUpload()
 
       if (onUploadComplete) {
         onUploadComplete()
@@ -64,6 +76,8 @@ export default function FileUpload({ onUploadComplete }) {
       // Clear message after 5 seconds
       setTimeout(() => setMessage(null), 5000)
     } catch (err) {
+      if (ignoreNextResultRef.current) return
+
       setMessage({
         type: 'error',
         text: err.response?.data?.detail || 'Upload failed',
@@ -78,30 +92,6 @@ export default function FileUpload({ onUploadComplete }) {
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">Upload Files</h3>
-
-      {/* Upload Type Selector */}
-      <div className="flex gap-4 mb-6">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="radio"
-            value="invoices"
-            checked={uploadType === 'invoices'}
-            onChange={(e) => setUploadType(e.target.value)}
-            className="w-4 h-4 text-blue-600"
-          />
-          <span className="text-gray-700 font-medium">Invoice Excel</span>
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="radio"
-            value="bank_statement"
-            checked={uploadType === 'bank_statement'}
-            onChange={(e) => setUploadType(e.target.value)}
-            className="w-4 h-4 text-blue-600"
-          />
-          <span className="text-gray-700 font-medium">Bank Statement</span>
-        </label>
-      </div>
 
       {/* File Upload Area */}
       <label className="block">
@@ -147,7 +137,7 @@ export default function FileUpload({ onUploadComplete }) {
         </div>
       )}
 
-      {uploadType === 'invoices' && lastInvoiceUpload && (
+      {lastInvoiceUpload && (
         <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 p-4">
           <p className="text-sm font-semibold text-blue-900">Last Invoice Upload</p>
           <p className="mt-1 text-sm text-blue-800">Time: {formatDateTime(lastInvoiceUpload.uploaded_at)}</p>

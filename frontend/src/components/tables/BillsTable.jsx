@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { billsAPI } from '../../services/api'
+import { billsAPI, dashboardAPI } from '../../services/api'
 import { Trash2, Eye } from 'lucide-react'
 
 const MONTH_OPTIONS = [
@@ -19,6 +19,8 @@ const MONTH_OPTIONS = [
 
 export default function BillsTable({ refreshToken = 0, onBillDeleted = null }) {
   const [bills, setBills] = useState([])
+  const [partyOptions, setPartyOptions] = useState([])
+  const [showPartySuggestions, setShowPartySuggestions] = useState(false)
   const [totalBills, setTotalBills] = useState(0)
   const [page, setPage] = useState(null)
   const [pageSize, setPageSize] = useState(25)
@@ -30,6 +32,12 @@ export default function BillsTable({ refreshToken = 0, onBillDeleted = null }) {
     party: '',
     month: '',
   })
+
+  const partyQuery = (filters.party || '').trim().toLowerCase()
+  const suggestedParties = partyQuery.length === 0
+    ? partyOptions
+    : partyOptions
+      .filter((name) => name.toLowerCase().includes(partyQuery))
 
   const totalPages = Math.max(1, Math.ceil(totalBills / pageSize))
 
@@ -73,6 +81,10 @@ export default function BillsTable({ refreshToken = 0, onBillDeleted = null }) {
   }, [refreshToken])
 
   useEffect(() => {
+    loadPartyOptions()
+  }, [refreshToken])
+
+  useEffect(() => {
     setPage(1)
   }, [filters.status, filters.party, filters.month, pageSize])
 
@@ -93,6 +105,20 @@ export default function BillsTable({ refreshToken = 0, onBillDeleted = null }) {
       console.error(err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadPartyOptions = async () => {
+    try {
+      const res = await dashboardAPI.getPartySummary()
+      const parties = (res?.data?.party_summary || [])
+        .map((p) => String(p?.party_name || '').trim())
+        .filter(Boolean)
+      const uniqueSorted = Array.from(new Set(parties)).sort((a, b) => a.localeCompare(b))
+      setPartyOptions(uniqueSorted)
+    } catch (err) {
+      console.error(err)
+      setPartyOptions([])
     }
   }
 
@@ -139,13 +165,41 @@ export default function BillsTable({ refreshToken = 0, onBillDeleted = null }) {
     <div className="space-y-4">
       {/* Filters */}
       <div className="bg-white rounded-lg shadow-md p-4 flex gap-4 items-center">
-        <input
-          type="text"
-          placeholder="Filter by party..."
-          value={filters.party}
-          onChange={(e) => setFilters({ ...filters, party: e.target.value })}
-          className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
-        />
+        <div className="relative flex-1">
+          <input
+            type="text"
+            placeholder="Filter by party..."
+            value={filters.party}
+            onFocus={() => setShowPartySuggestions(true)}
+            onBlur={() => {
+              setTimeout(() => setShowPartySuggestions(false), 120)
+            }}
+            onChange={(e) => {
+              setFilters({ ...filters, party: e.target.value })
+              setShowPartySuggestions(true)
+            }}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
+          />
+
+          {showPartySuggestions && suggestedParties.length > 0 && (
+            <div className="absolute z-20 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-44 overflow-y-auto">
+              {suggestedParties.map((partyName) => (
+                <button
+                  key={partyName}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setFilters({ ...filters, party: partyName })
+                    setShowPartySuggestions(false)
+                  }}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-blue-50"
+                >
+                  {partyName}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <select
           value={filters.status}
           onChange={(e) => setFilters({ ...filters, status: e.target.value })}
