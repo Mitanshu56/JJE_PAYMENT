@@ -115,6 +115,17 @@ export const statementsAPI = {
     const query = params.toString()
     return api.get(`/api/upload/statements/monthly${query ? `?${query}` : ''}`)
   },
+  getMatch: (filters = {}) => {
+    const params = new URLSearchParams()
+
+    if (filters.fiscalYear) params.append('fiscal_year', filters.fiscalYear)
+    if (filters.neftOnly !== undefined) params.append('neft_only', String(Boolean(filters.neftOnly)))
+    if (filters.page) params.append('page', filters.page)
+    if (filters.pageSize) params.append('page_size', filters.pageSize)
+
+    const query = params.toString()
+    return api.get(`/api/upload/statements/match${query ? `?${query}` : ''}`)
+  },
 }
 
 // Dashboard API

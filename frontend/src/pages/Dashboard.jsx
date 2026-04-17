@@ -5,6 +5,7 @@ import PartyTable from '../components/tables/PartyTable'
 import BillsTable from '../components/tables/BillsTable'
 import ManagePayments from '../components/payments/ManagePayments'
 import StatementTab from '../components/statements/StatementTab'
+import StatementMatchTab from '../components/statements/StatementMatchTab'
 import Charts from '../components/charts/Charts'
 import '../components/dashboard/Dashboard.css'
 
@@ -175,6 +176,16 @@ const Dashboard = forwardRef(function Dashboard(_, ref) {
             >
               Statement
             </button>
+            <button
+              onClick={() => setActiveTab('statement-match')}
+              className={`pb-3 px-4 font-medium border-b-2 transition ${
+                activeTab === 'statement-match'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Statement Match
+            </button>
           </div>
         </div>
 
@@ -194,6 +205,9 @@ const Dashboard = forwardRef(function Dashboard(_, ref) {
           )}
           {activeTab === 'statement' && (
             <StatementTab />
+          )}
+          {activeTab === 'statement-match' && (
+            <StatementMatchTab />
           )}
         </div>
       </div>

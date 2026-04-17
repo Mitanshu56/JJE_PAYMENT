@@ -7,6 +7,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 import tempfile
 import os
 import math
+import re
 from datetime import datetime, timezone
 from app.core.database import get_db
 from app.utils.excel_parser import InvoiceParser, BankStatementParser
@@ -17,6 +18,57 @@ from app.routes.payment_routes import reconcile_bills_from_payments
 import logging
 
 logger = logging.getLogger(__name__)
+
+PARTY_STOP_WORDS = {
+    'NEFT',
+    'RTGS',
+    'IMPS',
+    'INFLOW',
+    'INFLOWS',
+    'TRANSFER',
+    'TRF',
+    'SBIN',
+    'HDFC',
+    'ICIC',
+    'AXIS',
+    'KKBK',
+    'PUNB',
+    'UBIN',
+    'UTR',
+    'CHQ',
+    'CHEQUE',
+    'REF',
+}
+
+PARTY_PREFIX_STOP_WORDS = {
+    'BY',
+    'CLG',
+    'NEFT',
+    'RTGS',
+    'IMPS',
+    'INFLOW',
+    'INFLOWS',
+    'TRANSFER',
+    'TRF',
+}
+
+PARTY_GENERIC_TOKENS = {
+    'ELECTRICAL',
+    'ELECTRICALS',
+    'ENTERPRISE',
+    'ENTERPRISES',
+    'TRADERS',
+    'TRADING',
+    'SERVICES',
+    'SERVICE',
+    'PRIVATE',
+    'LIMITED',
+    'PVT',
+    'LTD',
+    'INDIA',
+    'COMPANY',
+    'CO',
+}
 
 MONTH_LABELS = {
     1: 'Jan',
@@ -97,6 +149,145 @@ def _group_statement_rows(rows):
     grouped = list(months.values())
     grouped.sort(key=lambda m: m['month_key'], reverse=True)
     return grouped
+
+
+def _normalize_party_text(value: str) -> str:
+    text = re.sub(r'[^A-Z0-9 ]+', ' ', (value or '').upper())
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def _tokenize_party_text(value: str) -> list[str]:
+    normalized = _normalize_party_text(value)
+    tokens = [token for token in normalized.split(' ') if len(token) > 1]
+    return [token for token in tokens if token not in PARTY_STOP_WORDS and not token.isdigit()]
+
+
+def _trim_candidate_tokens(tokens: list[str]) -> list[str]:
+    cleaned = [token for token in tokens if token]
+
+    while cleaned and cleaned[0] in PARTY_PREFIX_STOP_WORDS:
+        cleaned = cleaned[1:]
+
+    stop_prefixes = ('SBIN', 'HDFC', 'ICIC', 'AXIS', 'KKBK', 'PUNB', 'UBIN')
+    trimmed = []
+    for token in cleaned:
+        if token in PARTY_STOP_WORDS:
+            break
+        if token.startswith(stop_prefixes):
+            break
+        if token.isdigit():
+            break
+        if re.fullmatch(r'[A-Z]{4,}\d{3,}[A-Z\d]*', token):
+            break
+        trimmed.append(token)
+
+    return trimmed
+
+
+def _extract_party_from_narration(narration: str) -> str:
+    raw = _normalize_party_text(narration)
+    if not raw:
+        return ''
+
+    patterns = [
+        r'\bBY[-\s]+(.+)',
+        r'\bNEFT[-_\s]+(.+)',
+        r'\bRTGS[-_\s]+(.+)',
+        r'\bIMPS[-_\s]+(.+)',
+    ]
+
+    candidate = raw
+    for pattern in patterns:
+        matched = re.search(pattern, raw)
+        if matched:
+            candidate = matched.group(1).strip()
+            break
+
+    tokens = _trim_candidate_tokens(candidate.split(' '))
+    if not tokens:
+        fallback_tokens = _trim_candidate_tokens(raw.split(' '))
+        tokens = fallback_tokens[:4]
+
+    return ' '.join(tokens).strip()
+
+
+def _build_party_lookup(bills: list[dict]) -> dict:
+    lookup = {}
+    for bill in bills:
+        party_name = str(bill.get('party_name') or '').strip()
+        if not party_name:
+            continue
+
+        party_norm = _normalize_party_text(party_name)
+        if not party_norm:
+            continue
+
+        entry = lookup.get(party_norm)
+        if not entry:
+            entry = {
+                'party_name': party_name,
+                'party_norm': party_norm,
+                'party_tokens': set(_tokenize_party_text(party_name)),
+                'bills': [],
+            }
+            lookup[party_norm] = entry
+
+        entry['bills'].append(bill)
+
+    return lookup
+
+
+def _party_match_score(extracted_name: str, candidate_norm: str, candidate_tokens: set[str]) -> float:
+    extracted_norm = _normalize_party_text(extracted_name)
+    if not extracted_norm:
+        return 0.0
+
+    # Preserve strong exact-name match (case-insensitive by normalization).
+    if extracted_norm == candidate_norm:
+        return 1.0
+
+    ext_tokens = set(_tokenize_party_text(extracted_name))
+    if not ext_tokens or not candidate_tokens:
+        return 0.0
+
+    ext_core_tokens = {token for token in ext_tokens if token not in PARTY_GENERIC_TOKENS}
+    cand_core_tokens = {token for token in candidate_tokens if token not in PARTY_GENERIC_TOKENS}
+
+    # If extracted NEFT name has only generic words, avoid forced mapping.
+    if not ext_core_tokens:
+        return 0.0
+
+    # Phrase containment should not map on generic single words like ELECTRICALS.
+    if (extracted_norm in candidate_norm or candidate_norm in extracted_norm) and len(ext_core_tokens) >= 2:
+        return 0.92
+
+    core_overlap = len(ext_core_tokens & cand_core_tokens)
+    if core_overlap == 0:
+        return 0.0
+
+    overlap = len(ext_tokens & candidate_tokens)
+    if overlap == 0:
+        return 0.0
+
+    ratio_ext = core_overlap / max(len(ext_core_tokens), 1)
+    ratio_cand = core_overlap / max(len(cand_core_tokens), 1)
+    return min(0.9, (ratio_ext * 0.75) + (ratio_cand * 0.25))
+
+
+def _serialize_date(value) -> str:
+    if not value:
+        return ''
+    if hasattr(value, 'strftime'):
+        return value.strftime('%d/%m/%Y')
+    return str(value)
+
+
+def _serialize_datetime(value) -> str:
+    if not value:
+        return ''
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    return str(value)
 
 router = APIRouter(prefix="/api/upload", tags=["Upload"])
 
@@ -557,4 +748,143 @@ async def get_statement_rows_monthly(
         }
     except Exception as e:
         logger.error(f"✗ Error retrieving monthly statement rows: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get('/statements/match')
+async def get_statement_match(
+    fiscal_year: str | None = None,
+    neft_only: bool = Query(True),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Extract party names from statement narration and map them to invoice parties."""
+    try:
+        statement_rows = await db['statement_entries'].find({}).sort('value_date', -1).to_list(length=None)
+        if fiscal_year:
+            statement_rows = [
+                row for row in statement_rows
+                if _fiscal_year_from_key(row.get('month_key') or '') == fiscal_year
+            ]
+
+        if neft_only:
+            statement_rows = [
+                row for row in statement_rows
+                if 'NEFT' in _normalize_party_text(str(row.get('narration') or ''))
+            ]
+
+        bills = await db['bills'].find({}).to_list(length=None)
+        party_lookup = _build_party_lookup(bills)
+        parties = list(party_lookup.values())
+
+        total_rows = len(statement_rows)
+        start = (page - 1) * page_size
+        end = start + page_size
+        paged_rows = statement_rows[start:end]
+
+        matched_count = 0
+        results = []
+        extracted_party_set = set()
+
+        for row in paged_rows:
+            narration = str(row.get('narration') or '')
+            extracted_name = _extract_party_from_narration(narration)
+            if extracted_name:
+                extracted_party_set.add(extracted_name)
+
+            best_match = None
+            best_score = 0.0
+            if extracted_name:
+                for candidate in parties:
+                    score = _party_match_score(
+                        extracted_name,
+                        candidate['party_norm'],
+                        candidate['party_tokens'],
+                    )
+                    if score > best_score:
+                        best_score = score
+                        best_match = candidate
+
+            is_matched = best_match is not None and best_score >= 0.70
+            if is_matched:
+                matched_count += 1
+
+            invoices = []
+            party_payment_total = 0.0
+            party_pending_total = 0.0
+            party_invoice_grand_total = 0.0
+            if is_matched:
+                sorted_bills = sorted(
+                    best_match['bills'],
+                    key=lambda bill: (bill.get('invoice_date') or datetime.min),
+                )
+
+                for bill in sorted_bills:
+                    grand_total = float(bill.get('grand_total') or 0.0)
+                    paid_amount = float(bill.get('paid_amount') or 0.0)
+                    remaining_amount = float(bill.get('remaining_amount') or 0.0)
+                    party_invoice_grand_total += grand_total
+                    party_payment_total += paid_amount
+                    party_pending_total += remaining_amount
+                    invoices.append(
+                        {
+                            'id': str(bill.get('_id')),
+                            'invoice_no': bill.get('invoice_no') or '',
+                            'invoice_date': _serialize_date(bill.get('invoice_date')),
+                            'grand_total': grand_total,
+                            'paid_amount': paid_amount,
+                            'remaining_amount': remaining_amount,
+                            'status': bill.get('status') or 'UNPAID',
+                            'matched_payment_ids': bill.get('matched_payment_ids') or [],
+                        }
+                    )
+
+            results.append(
+                {
+                    'statement_entry': {
+                        'id': str(row.get('_id')),
+                        'value_date': row.get('value_date_display') or _serialize_date(row.get('value_date')),
+                        'deposit': float(row.get('deposit') or 0.0),
+                        'narration': narration,
+                        'reference': row.get('reference') or '',
+                        'month_key': row.get('month_key') or '',
+                        'source_file': row.get('source_file') or '',
+                        'created_at': _serialize_datetime(row.get('created_at')),
+                    },
+                    'extracted_party_name': extracted_name,
+                    'matched': is_matched,
+                    'match_confidence': round(best_score, 2) if is_matched else 0.0,
+                    'matched_party': {
+                        'party_name': best_match['party_name'],
+                        'invoice_count': len(invoices),
+                        'total_billed': round(party_invoice_grand_total, 2),
+                        'total_paid': round(party_payment_total, 2),
+                        'total_pending': round(party_pending_total, 2),
+                        'invoice_grand_total': round(party_invoice_grand_total, 2),
+                        'invoice_paid_total': round(party_payment_total, 2),
+                        'invoice_pending_total': round(party_pending_total, 2),
+                    } if is_matched else None,
+                    'invoices': invoices,
+                }
+            )
+
+        return {
+            'status': 'success',
+            'rows': results,
+            'available_parties': sorted(extracted_party_set),
+            'summary': {
+                'total_rows': total_rows,
+                'page_rows': len(results),
+                'matched_rows': matched_count,
+                'unmatched_rows': len(results) - matched_count,
+            },
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'total_pages': math.ceil(total_rows / page_size) if total_rows else 0,
+            },
+        }
+    except Exception as e:
+        logger.error(f"✗ Error retrieving statement match rows: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
