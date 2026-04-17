@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Upload, Check, AlertCircle } from 'lucide-react'
 import { uploadAPI } from '../services/api'
 
@@ -6,6 +6,27 @@ export default function FileUpload({ onUploadComplete }) {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState(null)
   const [uploadType, setUploadType] = useState('invoices')
+  const [lastInvoiceUpload, setLastInvoiceUpload] = useState(null)
+
+  const formatDateTime = (value) => {
+    if (!value) return '-'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return '-'
+    return date.toLocaleString()
+  }
+
+  const loadLastInvoiceUpload = async () => {
+    try {
+      const response = await uploadAPI.getLastInvoiceUpload()
+      setLastInvoiceUpload(response?.data?.last_upload || null)
+    } catch {
+      setLastInvoiceUpload(null)
+    }
+  }
+
+  useEffect(() => {
+    loadLastInvoiceUpload()
+  }, [])
 
   const handleFileSelect = async (e) => {
     const file = e.target.files?.[0]
@@ -22,10 +43,19 @@ export default function FileUpload({ onUploadComplete }) {
         result = await uploadAPI.uploadBankStatement(file)
       }
 
+      const summary = result?.data?.import_summary
+      const successText = summary
+        ? `Upload complete: ${summary.new_records} new, ${summary.updated_records} updated, ${summary.unchanged_records} unchanged. Uploaded at ${formatDateTime(summary.current_upload_at)}.`
+        : result.data.message
+
       setMessage({
         type: 'success',
-        text: result.data.message,
+        text: successText,
       })
+
+      if (uploadType === 'invoices') {
+        await loadLastInvoiceUpload()
+      }
 
       if (onUploadComplete) {
         onUploadComplete()
@@ -114,6 +144,16 @@ export default function FileUpload({ onUploadComplete }) {
         <div className="mt-4 text-center">
           <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
           <p className="text-gray-600 mt-2">Uploading file...</p>
+        </div>
+      )}
+
+      {uploadType === 'invoices' && lastInvoiceUpload && (
+        <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 p-4">
+          <p className="text-sm font-semibold text-blue-900">Last Invoice Upload</p>
+          <p className="mt-1 text-sm text-blue-800">Time: {formatDateTime(lastInvoiceUpload.uploaded_at)}</p>
+          <p className="text-sm text-blue-800">New records: {lastInvoiceUpload.new_records}</p>
+          <p className="text-sm text-blue-800">Updated records: {lastInvoiceUpload.updated_records}</p>
+          <p className="text-sm text-blue-800">Unchanged records: {lastInvoiceUpload.unchanged_records}</p>
         </div>
       )}
     </div>

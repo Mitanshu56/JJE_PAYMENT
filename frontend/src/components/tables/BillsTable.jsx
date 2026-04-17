@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { billsAPI } from '../../services/api'
 import { Trash2, Eye } from 'lucide-react'
 
@@ -17,13 +17,14 @@ const MONTH_OPTIONS = [
   { label: 'December', value: '12' },
 ]
 
-export default function BillsTable() {
+export default function BillsTable({ refreshToken = 0, onBillDeleted = null }) {
   const [bills, setBills] = useState([])
   const [totalBills, setTotalBills] = useState(0)
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useState(null)
   const [pageSize, setPageSize] = useState(25)
   const [loading, setLoading] = useState(false)
   const [selectedBill, setSelectedBill] = useState(null)
+  const didInitLastPage = useRef(false)
   const [filters, setFilters] = useState({
     status: '',
     party: '',
@@ -33,8 +34,43 @@ export default function BillsTable() {
   const totalPages = Math.max(1, Math.ceil(totalBills / pageSize))
 
   useEffect(() => {
-    loadBills()
-  }, [filters, page, pageSize])
+    const initLastPage = async () => {
+      if (didInitLastPage.current || page !== null) return
+
+      try {
+        const res = await billsAPI.getAll(
+          0,
+          1,
+          filters.status || null,
+          filters.party || null,
+          filters.month || null,
+        )
+        const total = res?.data?.total || 0
+        setTotalBills(total)
+        const lastPage = Math.max(1, Math.ceil(total / pageSize))
+        setPage(lastPage)
+      } catch (err) {
+        console.error(err)
+        setPage(1)
+      } finally {
+        didInitLastPage.current = true
+      }
+    }
+
+    initLastPage()
+  }, [page, pageSize, filters.status, filters.party, filters.month])
+
+  useEffect(() => {
+    if (page !== null) {
+      loadBills()
+    }
+  }, [filters, page, pageSize, refreshToken])
+
+  useEffect(() => {
+    // After upload refresh, reopen invoices on the current last page by re-running init.
+    didInitLastPage.current = false
+    setPage(null)
+  }, [refreshToken])
 
   useEffect(() => {
     setPage(1)
@@ -60,11 +96,16 @@ export default function BillsTable() {
     }
   }
 
-  const handleDelete = async (invoiceNo) => {
+  const handleDelete = async (bill) => {
     if (window.confirm('Are you sure you want to delete this bill?')) {
       try {
-        await billsAPI.delete(invoiceNo)
+        if (bill?._id) {
+          await billsAPI.deleteById(bill._id)
+        } else {
+          await billsAPI.delete(bill?.invoice_no)
+        }
         await loadBills()
+        await Promise.resolve(onBillDeleted?.())
       } catch (err) {
         console.error(err)
       }
@@ -97,7 +138,7 @@ export default function BillsTable() {
   return (
     <div className="space-y-4">
       {/* Filters */}
-      <div className="bg-white rounded-lg shadow-md p-4 flex gap-4">
+      <div className="bg-white rounded-lg shadow-md p-4 flex gap-4 items-center">
         <input
           type="text"
           placeholder="Filter by party..."
@@ -226,7 +267,7 @@ export default function BillsTable() {
                         <Eye size={18} />
                       </button>
                       <button
-                        onClick={() => handleDelete(bill.invoice_no)}
+                        onClick={() => handleDelete(bill)}
                         className="text-red-600 hover:text-red-800"
                         title="Delete"
                       >
@@ -257,15 +298,15 @@ export default function BillsTable() {
             </select>
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1 || loading}
+              disabled={(page || 1) === 1 || loading}
               className="px-3 py-1 border border-gray-300 rounded disabled:opacity-50"
             >
               Prev
             </button>
-            <span className="text-sm text-gray-700">Page {page} / {totalPages}</span>
+            <span className="text-sm text-gray-700">Page {page || 1} / {totalPages}</span>
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page >= totalPages || loading}
+              disabled={(page || 1) >= totalPages || loading}
               className="px-3 py-1 border border-gray-300 rounded disabled:opacity-50"
             >
               Next

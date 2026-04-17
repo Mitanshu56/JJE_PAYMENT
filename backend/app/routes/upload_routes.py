@@ -118,6 +118,13 @@ async def upload_invoices(file: UploadFile = File(...), db: AsyncIOMotorDatabase
             temp_path = temp_file.name
         
         try:
+            previous_upload = await db['upload_logs'].find_one(
+                {'file_type': 'invoice'},
+                sort=[('created_at', -1)]
+            )
+
+            upload_batch_id = datetime.utcnow().strftime('%Y%m%d%H%M%S%f')
+
             # Parse invoices
             parser = InvoiceParser(temp_path)
             invoices = parser.parse()
@@ -127,23 +134,46 @@ async def upload_invoices(file: UploadFile = File(...), db: AsyncIOMotorDatabase
             
             # Store in database
             bill_controller = BillController(db)
-            deleted_result = await db['bills'].delete_many({})
-            if deleted_result.deleted_count:
-                logger.info(f"✓ Cleared {deleted_result.deleted_count} existing bills before import")
-            inserted_count = await bill_controller.create_bills_bulk(invoices)
+            import_stats = await bill_controller.create_bills_bulk(invoices, upload_batch_id=upload_batch_id)
+            total_bills_after_upload = await db['bills'].count_documents({})
+            upload_time = datetime.utcnow()
             
-            # Log upload
+            # Log upload with accurate statistics
             await db['upload_logs'].insert_one({
                 'file_name': file.filename,
                 'file_type': 'invoice',
-                'records_count': inserted_count,
-                'created_at': datetime.utcnow()
+                'total_in_file': import_stats['total_in_file'],
+                'new_records': import_stats['new_records'],
+                'updated_records': import_stats['updated_records'],
+                'unchanged_records': import_stats['unchanged_records'],
+                'skipped_records': import_stats['skipped_records'],
+                'total_processed': import_stats['new_records'] + import_stats['updated_records'],
+                'total_bills_after_upload': total_bills_after_upload,
+                'upload_batch_id': upload_batch_id,
+                'created_at': upload_time,
             })
+
+            previous_upload_at = previous_upload.get('created_at') if previous_upload else None
             
             return {
                 'status': 'success',
-                'message': f'Successfully imported {inserted_count} invoices',
-                'invoices_count': inserted_count,
+                'message': (
+                    f"Upload complete: {import_stats['new_records']} new, "
+                    f"{import_stats['updated_records']} updated, "
+                    f"{import_stats['unchanged_records']} unchanged"
+                ),
+                'invoices_count': import_stats['new_records'],
+                'import_summary': {
+                    'total_in_file': import_stats['total_in_file'],
+                    'new_records': import_stats['new_records'],
+                    'updated_records': import_stats['updated_records'],
+                    'unchanged_records': import_stats['unchanged_records'],
+                    'skipped_records': import_stats['skipped_records'],
+                    'total_bills_after_upload': total_bills_after_upload,
+                    'upload_batch_id': upload_batch_id,
+                    'current_upload_at': upload_time,
+                    'previous_upload_at': previous_upload_at,
+                },
                 'invoices': invoices[:5]  # Return first 5 for preview
             }
         
@@ -239,6 +269,39 @@ async def get_upload_history(limit: int = 50, db: AsyncIOMotorDatabase = Depends
         }
     except Exception as e:
         logger.error(f"✗ Error retrieving upload history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/invoices/last")
+async def get_last_invoice_upload(db: AsyncIOMotorDatabase = Depends(get_db)):
+    """Get last invoice upload timestamp and summary stats."""
+    try:
+        last_log = await db['upload_logs'].find_one(
+            {'file_type': 'invoice'},
+            sort=[('created_at', -1)]
+        )
+
+        if not last_log:
+            return {
+                'status': 'success',
+                'last_upload': None,
+            }
+
+        return {
+            'status': 'success',
+            'last_upload': {
+                'file_name': last_log.get('file_name'),
+                'uploaded_at': last_log.get('created_at'),
+                'new_records': int(last_log.get('new_records', last_log.get('records_count', 0)) or 0),
+                'updated_records': int(last_log.get('updated_records', 0) or 0),
+                'unchanged_records': int(last_log.get('unchanged_records', 0) or 0),
+                'skipped_records': int(last_log.get('skipped_records', 0) or 0),
+                'total_in_file': int(last_log.get('total_in_file', 0) or 0),
+                'total_bills_after_upload': int(last_log.get('total_bills_after_upload', 0) or 0),
+            }
+        }
+    except Exception as e:
+        logger.error(f"✗ Error retrieving last invoice upload: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

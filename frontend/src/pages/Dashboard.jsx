@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { dashboardAPI, billsAPI } from '../services/api'
 import SummaryCards from '../components/dashboard/SummaryCards'
 import PartyTable from '../components/tables/PartyTable'
@@ -8,7 +8,7 @@ import StatementTab from '../components/statements/StatementTab'
 import Charts from '../components/charts/Charts'
 import '../components/dashboard/Dashboard.css'
 
-export default function Dashboard() {
+const Dashboard = forwardRef(function Dashboard(_, ref) {
   const [summary, setSummary] = useState(null)
   const [partySummary, setPartySummary] = useState(null)
   const [monthlySummary, setMonthlySummary] = useState(null)
@@ -16,10 +16,18 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [activeTab, setActiveTab] = useState('summary')
+  const [invoicesRefreshToken, setInvoicesRefreshToken] = useState(0)
 
   useEffect(() => {
     loadDashboardData()
   }, [])
+
+  useImperativeHandle(ref, () => ({
+    reload: async () => {
+      await loadDashboardData()
+      setInvoicesRefreshToken((prev) => prev + 1)
+    },
+  }))
 
   const loadDashboardData = async () => {
     try {
@@ -179,7 +187,7 @@ export default function Dashboard() {
             <PartyTable parties={partySummary} bills={allBills} />
           )}
           {activeTab === 'invoices' && (
-            <BillsTable />
+            <BillsTable refreshToken={invoicesRefreshToken} onBillDeleted={loadDashboardData} />
           )}
           {activeTab === 'manage-payments' && (
             <ManagePayments bills={allBills} onPaymentSaved={loadDashboardData} />
@@ -191,4 +199,6 @@ export default function Dashboard() {
       </div>
     </div>
   )
-}
+})
+
+export default Dashboard

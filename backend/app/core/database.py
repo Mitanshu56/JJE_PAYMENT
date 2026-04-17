@@ -54,6 +54,7 @@ async def create_indexes():
         await bills_col.create_index("party_name")
         await bills_col.create_index("invoice_date")
         await bills_col.create_index("status")
+        await bills_col.create_index([("last_upload_batch_id", 1), ("created_at", -1)])
         
         # Payments indexes
         payments_col = db["payments"]
@@ -70,6 +71,7 @@ async def create_indexes():
         logs_col = db["upload_logs"]
         await logs_col.create_index("created_at")
         await logs_col.create_index("file_name")
+        await logs_col.create_index([("file_type", 1), ("created_at", -1)])
 
         # Statement entries indexes
         statements_col = db["statement_entries"]

@@ -47,15 +47,22 @@ class BillController:
             logger.error(f"✗ Error creating bill: {str(e)}")
             raise
     
-    async def create_bills_bulk(self, bills_data: List[dict]) -> int:
-        """Create or update multiple bills by invoice number."""
+    async def create_bills_bulk(self, bills_data: List[dict], upload_batch_id: Optional[str] = None) -> dict:
+        """Create or update multiple bills and return import statistics."""
         try:
-            processed_count = 0
+            stats = {
+                'total_in_file': len(bills_data),
+                'new_records': 0,
+                'updated_records': 0,
+                'unchanged_records': 0,
+                'skipped_records': 0,
+            }
 
             for bill in bills_data:
                 invoice_no = str(bill.get('invoice_no') or '').strip()
                 if not invoice_no:
                     logger.warning("Skipping bill without invoice_no")
+                    stats['skipped_records'] += 1
                     continue
 
                 now = datetime.utcnow()
@@ -77,6 +84,8 @@ class BillController:
                             'sgst': float(bill.get('sgst') or 0.0),
                             'grand_total': grand_total,
                             'site': bill.get('site'),
+                            'last_upload_batch_id': upload_batch_id,
+                            'last_seen_upload_at': now,
                             'updated_at': now,
                         },
                         '$setOnInsert': {
@@ -90,11 +99,21 @@ class BillController:
                     upsert=True
                 )
 
-                if result.upserted_id or result.matched_count > 0 or result.modified_count > 0:
-                    processed_count += 1
+                if result.upserted_id:
+                    stats['new_records'] += 1
+                elif result.modified_count > 0:
+                    stats['updated_records'] += 1
+                elif result.matched_count > 0:
+                    stats['unchanged_records'] += 1
 
-            logger.info(f"✓ Upserted {processed_count} bills")
-            return processed_count
+            logger.info(
+                "✓ Invoice import stats: "
+                f"new={stats['new_records']}, "
+                f"updated={stats['updated_records']}, "
+                f"unchanged={stats['unchanged_records']}, "
+                f"skipped={stats['skipped_records']}"
+            )
+            return stats
         except Exception as e:
             logger.error(f"✗ Error creating bills: {str(e)}")
             raise
@@ -110,10 +129,13 @@ class BillController:
     async def get_bills(self, filters: dict = None, skip: int = 0, limit: int = 100) -> List[dict]:
         """Get bills with optional filters"""
         query = filters or {}
-        # Preserve the original upload/insertion order so pagination matches the source sheet.
+        # Use numeric collation so invoice numbers sort naturally: 1, 2, 3 ... 10.
         cursor = self.collection.find(query).sort([
-            ('_id', 1),
-        ]).skip(skip).limit(limit)
+            ('invoice_no', 1),
+        ]).collation({
+            'locale': 'en',
+            'numericOrdering': True,
+        }).skip(skip).limit(limit)
         bills = await cursor.to_list(length=limit)
         await self._enrich_missing_gst_by_party(bills)
         return bills

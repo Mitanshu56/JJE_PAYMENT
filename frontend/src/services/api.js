@@ -42,7 +42,13 @@ export const authAPI = {
 
 // Bills API
 export const billsAPI = {
-  getAll: (skip = 0, limit = 100, status = null, party = null, month = null) => {
+  getAll: (
+    skip = 0,
+    limit = 100,
+    status = null,
+    party = null,
+    month = null,
+  ) => {
     const params = new URLSearchParams({ skip, limit })
     if (status) params.append('status', status)
     if (party) params.append('party', party)
@@ -51,6 +57,7 @@ export const billsAPI = {
   },
   getById: (invoiceNo) => api.get(`/api/bills/${invoiceNo}`),
   getByParty: (partyName) => api.get(`/api/bills/party/${partyName}`),
+  deleteById: (billId) => api.delete(`/api/bills/by-id/${billId}`),
   delete: (invoiceNo) => api.delete(`/api/bills/${invoiceNo}`),
 }
 
@@ -91,6 +98,7 @@ export const uploadAPI = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  getLastInvoiceUpload: () => api.get('/api/upload/invoices/last'),
   getHistory: (limit = 50) => api.get(`/api/upload/history?limit=${limit}`),
 }
 
