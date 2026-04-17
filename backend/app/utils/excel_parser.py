@@ -244,7 +244,7 @@ class InvoiceParser:
             if any(token in cell_lower for token in label_tokens):
                 for j in range(i + 1, len(row_data)):
                     val = row_data[j]
-                    if val not in ("", None):
+                    if val not in ("", None) and not self._is_label_like_value(val):
                         return val
         return None
 
@@ -254,9 +254,27 @@ class InvoiceParser:
             if any(token in cell for token in label_tokens):
                 for next_row in range(row_idx + 1, min(row_idx + 4, len(rows))):
                     val = rows[next_row][col_idx] if col_idx < len(rows[next_row]) else ""
-                    if val not in ("", None):
+                    if val not in ("", None) and not self._is_label_like_value(val):
                         return val
         return None
+
+    def _is_label_like_value(self, value) -> bool:
+        """Return True when a candidate value is just a header/label token."""
+        if value in (None, ""):
+            return True
+
+        text = str(value).strip().lower()
+        if not text:
+            return True
+
+        label_tokens = {
+            'date', 'invoice', 'invoice no', 'invoice number', 'bill no', 'bill number',
+            'gst', 'gst no', 'gstin', 'party gst no', 'challan', 'order', 'site', 'total'
+        }
+        if text in label_tokens:
+            return True
+
+        return bool(re.fullmatch(r'(?i)(invoice\s*(no\.?|number)|date|gst(in)?|bill\s*(no\.?|number))', text))
 
     def _extract_first_non_empty_below_in_col(self, rows: List[List[str]], row_idx: int, col_idx: int):
         """Read first non-empty value below the given column, skipping helper labels."""
@@ -443,6 +461,9 @@ class InvoiceParser:
 
             text = str(value).strip()
             text = re.sub(r'(?i)^invoice\s*(?:no\.?|number)\s*:?\s*', '', text).strip()
+
+            if self._is_label_like_value(text):
+                return None
 
             # Ignore values that are purely date-like.
             date_like_patterns = [

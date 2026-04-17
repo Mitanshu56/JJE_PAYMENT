@@ -21,16 +21,33 @@ export default function Dashboard() {
   const loadDashboardData = async () => {
     try {
       setLoading(true)
-      const [summaryRes, partyRes, monthlyRes] = await Promise.all([
+      const [summaryRes, partyRes, monthlyRes] = await Promise.allSettled([
         dashboardAPI.getSummary(),
         dashboardAPI.getPartySummary(),
         dashboardAPI.getMonthlySummary(),
       ])
 
-      setSummary(summaryRes.data.summary)
-      setPartySummary(partyRes.data.party_summary)
-      setMonthlySummary(monthlyRes.data.monthly_summary)
-      setError(null)
+      const errors = []
+
+      if (summaryRes.status === 'fulfilled') {
+        setSummary(summaryRes.value.data.summary)
+      } else {
+        errors.push('summary')
+      }
+
+      if (partyRes.status === 'fulfilled') {
+        setPartySummary(partyRes.value.data.party_summary || [])
+      } else {
+        errors.push('parties')
+      }
+
+      if (monthlyRes.status === 'fulfilled') {
+        setMonthlySummary(monthlyRes.value.data.monthly_summary || [])
+      } else {
+        errors.push('monthly')
+      }
+
+      setError(errors.length ? `Failed to load: ${errors.join(', ')}` : null)
     } catch (err) {
       setError('Failed to load dashboard data')
       console.error(err)

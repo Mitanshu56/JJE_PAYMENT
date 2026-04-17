@@ -99,16 +99,20 @@ class BillController:
             raise
     
     async def get_bill(self, invoice_no: str) -> Optional[dict]:
-        """Get a bill by invoice number"""
+        """Get a bill by invoice number."""
+        invoice_no = str(invoice_no or '').strip()
+        if not invoice_no:
+            return None
+
         return await self.collection.find_one({'invoice_no': invoice_no})
     
     async def get_bills(self, filters: dict = None, skip: int = 0, limit: int = 100) -> List[dict]:
         """Get bills with optional filters"""
         query = filters or {}
+        # Preserve the original upload/insertion order so pagination matches the source sheet.
         cursor = self.collection.find(query).sort([
-            ('invoice_no', 1),
-            ('invoice_date', 1),
-        ]).collation({'locale': 'en', 'numericOrdering': True}).skip(skip).limit(limit)
+            ('_id', 1),
+        ]).skip(skip).limit(limit)
         bills = await cursor.to_list(length=limit)
         await self._enrich_missing_gst_by_party(bills)
         return bills

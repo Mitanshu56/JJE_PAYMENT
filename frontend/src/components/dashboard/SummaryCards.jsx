@@ -2,10 +2,14 @@ import React from 'react'
 import { TrendingUp, TrendingDown, DollarSign, FileText } from 'lucide-react'
 
 export default function SummaryCards({ summary }) {
+  const safeSummary = summary || {}
+  const paidPercentage = Number(safeSummary.paid_percentage || 0)
+  const invoiceStats = safeSummary.invoice_stats || {}
+
   const cards = [
     {
       title: 'Total Billing',
-      value: `₹${(summary.total_billing || 0).toLocaleString('en-IN', {
+      value: `₹${(safeSummary.total_billing || 0).toLocaleString('en-IN', {
         maximumFractionDigits: 2,
       })}`,
       icon: DollarSign,
@@ -14,28 +18,28 @@ export default function SummaryCards({ summary }) {
     },
     {
       title: 'Total Received',
-      value: `₹${(summary.total_paid || 0).toLocaleString('en-IN', {
+      value: `₹${(safeSummary.total_paid || 0).toLocaleString('en-IN', {
         maximumFractionDigits: 2,
       })}`,
       icon: TrendingUp,
       color: 'bg-green-500',
-      change: `${summary.paid_percentage.toFixed(1)}%`,
+      change: `${paidPercentage.toFixed(1)}%`,
     },
     {
       title: 'Pending Amount',
-      value: `₹${(summary.total_pending || 0).toLocaleString('en-IN', {
+      value: `₹${(safeSummary.total_pending || 0).toLocaleString('en-IN', {
         maximumFractionDigits: 2,
       })}`,
       icon: TrendingDown,
       color: 'bg-red-500',
-      change: `${(100 - summary.paid_percentage).toFixed(1)}%`,
+      change: `${(100 - paidPercentage).toFixed(1)}%`,
     },
     {
       title: 'Total Invoices',
-      value: summary.invoice_stats.total,
+      value: invoiceStats.total || 0,
       icon: FileText,
       color: 'bg-purple-500',
-      subtext: `${summary.invoice_stats.paid} Paid • ${summary.invoice_stats.unpaid} Unpaid`,
+      subtext: `${invoiceStats.paid || 0} Paid • ${invoiceStats.unpaid || 0} Unpaid`,
     },
   ]
 

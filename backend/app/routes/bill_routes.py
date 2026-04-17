@@ -60,16 +60,15 @@ async def get_bill(invoice_no: str, db: AsyncIOMotorDatabase = Depends(get_db)):
     try:
         controller = BillController(db)
         bill = await controller.get_bill(invoice_no)
-        
+
         if not bill:
             raise HTTPException(status_code=404, detail="Bill not found")
-        
-        # Convert ObjectId to string
+
         if '_id' in bill:
             bill['_id'] = str(bill['_id'])
         if isinstance(bill.get('invoice_date'), datetime):
             bill['invoice_date'] = bill['invoice_date'].isoformat()
-        
+
         return {
             'status': 'success',
             'bill': bill

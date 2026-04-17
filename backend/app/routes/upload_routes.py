@@ -45,6 +45,9 @@ async def upload_invoices(file: UploadFile = File(...), db: AsyncIOMotorDatabase
             
             # Store in database
             bill_controller = BillController(db)
+            deleted_result = await db['bills'].delete_many({})
+            if deleted_result.deleted_count:
+                logger.info(f"✓ Cleared {deleted_result.deleted_count} existing bills before import")
             inserted_count = await bill_controller.create_bills_bulk(invoices)
             
             # Log upload

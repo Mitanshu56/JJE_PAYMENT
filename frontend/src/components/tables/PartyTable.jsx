@@ -2,7 +2,8 @@ import React from 'react'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 
 export default function PartyTable({ parties }) {
-  const sortedParties = [...parties].sort((a, b) => b.total_billed - a.total_billed)
+  const safeParties = Array.isArray(parties) ? parties : []
+  const sortedParties = [...safeParties].sort((a, b) => (b.total_billed || 0) - (a.total_billed || 0))
 
   const getHealthStatus = (paid, total) => {
     const percentage = (paid / total) * 100
@@ -39,8 +40,10 @@ export default function PartyTable({ parties }) {
         </thead>
         <tbody className="divide-y divide-gray-200">
           {sortedParties.map((party) => {
-            const collectionPercentage = (party.total_paid / party.total_billed * 100).toFixed(1)
-            const status = getHealthStatus(party.total_paid, party.total_billed)
+            const totalBilled = party.total_billed || 0
+            const totalPaid = party.total_paid || 0
+            const collectionPercentage = totalBilled > 0 ? (totalPaid / totalBilled * 100).toFixed(1) : '0.0'
+            const status = getHealthStatus(totalPaid, totalBilled)
             const StatusIcon = status.icon
 
             return (
@@ -49,10 +52,10 @@ export default function PartyTable({ parties }) {
                   {party.party_name}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 font-medium">
-                  ₹{(party.total_billed || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                  ₹{totalBilled.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-green-600 font-medium">
-                  ₹{(party.total_paid || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                  ₹{totalPaid.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-red-600 font-medium">
                   ₹{(party.pending_amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
