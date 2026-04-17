@@ -6,6 +6,7 @@ from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.models.bill import Bill, BillStatus
 from bson import ObjectId
+import re
 import logging
 
 logger = logging.getLogger(__name__)
@@ -18,20 +19,97 @@ class BillController:
         self.db = db
         self.collection = db['bills']
 
+    def _normalize_text(self, value: Optional[str]) -> str:
+        return str(value or '').strip().lower()
+
     def _build_invoice_key(self, bill_data: dict) -> str:
-        """Build a stable key to uniquely identify invoice rows across uploads."""
-        invoice_no = str(bill_data.get('invoice_no') or '').strip().lower()
-        party_name = str(bill_data.get('party_name') or '').strip().lower()
+        """
+        Build a stable identity key for invoice upserts.
 
-        invoice_date = bill_data.get('invoice_date')
-        if hasattr(invoice_date, 'strftime'):
-            invoice_date_part = invoice_date.strftime('%Y-%m-%d')
-        else:
-            invoice_date_part = str(invoice_date or '').strip().lower()
+        Important: exclude mutable fields (like invoice_date) so edits in source
+        files update an existing record instead of creating a new one.
+        """
+        invoice_no = self._normalize_text(bill_data.get('invoice_no'))
+        party_name = self._normalize_text(bill_data.get('party_name'))
+        site = self._normalize_text(bill_data.get('site'))
+        return f"{invoice_no}|{party_name}|{site}"
 
-        site = str(bill_data.get('site') or '').strip().lower()
-        return f"{invoice_no}|{party_name}|{invoice_date_part}|{site}"
+    async def _find_legacy_matching_bill(self, bill_data: dict, exclude_id: Optional[ObjectId] = None) -> Optional[dict]:
+        """Find old records created before stable key logic (or with stale keys)."""
+        invoice_no = self._normalize_text(bill_data.get('invoice_no'))
+        party_name = self._normalize_text(bill_data.get('party_name'))
+        site = self._normalize_text(bill_data.get('site'))
+
+        if not invoice_no:
+            return None
+
+        fallback_query = {
+            'invoice_no_norm': invoice_no,
+            'party_name_norm': party_name,
+            'site_norm': site,
+        }
+        if exclude_id:
+            fallback_query['_id'] = {'$ne': exclude_id}
+        legacy = await self.collection.find_one(fallback_query)
+        if legacy:
+            return legacy
+
+        # Backward-compatibility path for records that predate *_norm fields.
+        escaped_invoice = re.escape(invoice_no)
+        escaped_party = re.escape(party_name)
+        escaped_site = re.escape(site)
+
+        legacy_query = {
+            'invoice_no': {'$regex': f'^{invoice_no}$', '$options': 'i'},
+            'party_name': {'$regex': f'^{party_name}$', '$options': 'i'},
+            '$or': [
+                {'site': {'$exists': False}},
+                {'site': None},
+                {'site': ''},
+                {'site': {'$regex': f'^{escaped_site}$', '$options': 'i'}},
+            ],
+        }
+        legacy_query['invoice_no'] = {'$regex': f'^{escaped_invoice}$', '$options': 'i'}
+        legacy_query['party_name'] = {'$regex': f'^{escaped_party}$', '$options': 'i'}
+        if exclude_id:
+            legacy_query['_id'] = {'$ne': exclude_id}
+
+        return await self.collection.find_one(legacy_query)
     
+    async def _consolidate_duplicate_keys(self, invoice_key: str) -> Optional[dict]:
+        """
+        Find and consolidate duplicate invoice_key records.
+        Keeps the oldest record, merges payment data, deletes duplicates.
+        Returns the consolidated record, or None if only one exists.
+        """
+        duplicates = await self.collection.find({'invoice_key': invoice_key})\
+            .sort([('created_at', 1)])\
+            .to_list(length=None)
+        
+        if len(duplicates) <= 1:
+            return duplicates[0] if duplicates else None
+        
+        # Keep the first (oldest) record
+        primary = duplicates[0]
+        to_delete = duplicates[1:]
+        
+        # Merge payment data from duplicates into primary
+        merged_payment_ids = set(primary.get('matched_payment_ids') or [])
+        for dup in to_delete:
+            merged_payment_ids.update(dup.get('matched_payment_ids') or [])
+        
+        await self.collection.update_one(
+            {'_id': primary['_id']},
+            {'$set': {'matched_payment_ids': list(merged_payment_ids)}}
+        )
+        
+        # Delete duplicates
+        for dup in to_delete:
+            await self.collection.delete_one({'_id': dup['_id']})
+        
+        logger.info(f"✓ Consolidated {len(to_delete)} duplicate invoice_key records: {invoice_key}")
+        return primary
+
     async def create_bill(self, bill_data: dict) -> dict:
         """Create a new bill"""
         try:
@@ -68,38 +146,81 @@ class BillController:
                 now = datetime.utcnow()
                 grand_total = float(bill.get('grand_total') or 0.0)
                 invoice_key = self._build_invoice_key(bill)
+                invoice_no_norm = self._normalize_text(invoice_no)
+                party_name_norm = self._normalize_text(bill.get('party_name') or 'Unknown Party')
+                site_norm = self._normalize_text(bill.get('site'))
 
-                # Upsert keeps re-uploads idempotent and avoids duplicate-key failures.
-                result = await self.collection.update_one(
-                    {'invoice_key': invoice_key},
-                    {
-                        '$set': {
-                            'invoice_key': invoice_key,
-                            'invoice_no': invoice_no,
-                            'party_name': bill.get('party_name', 'Unknown Party'),
-                            'gst_no': bill.get('gst_no'),
-                            'invoice_date': bill.get('invoice_date'),
-                            'net_amount': float(bill.get('net_amount') or 0.0),
-                            'cgst': float(bill.get('cgst') or 0.0),
-                            'sgst': float(bill.get('sgst') or 0.0),
-                            'grand_total': grand_total,
-                            'site': bill.get('site'),
-                            'last_upload_batch_id': upload_batch_id,
-                            'last_seen_upload_at': now,
-                            'updated_at': now,
+                set_doc = {
+                    'invoice_key': invoice_key,
+                    'invoice_no': invoice_no,
+                    'invoice_no_norm': invoice_no_norm,
+                    'party_name': bill.get('party_name', 'Unknown Party'),
+                    'party_name_norm': party_name_norm,
+                    'gst_no': bill.get('gst_no'),
+                    'invoice_date': bill.get('invoice_date'),
+                    'net_amount': float(bill.get('net_amount') or 0.0),
+                    'cgst': float(bill.get('cgst') or 0.0),
+                    'sgst': float(bill.get('sgst') or 0.0),
+                    'grand_total': grand_total,
+                    'site': bill.get('site'),
+                    'site_norm': site_norm,
+                    'last_upload_batch_id': upload_batch_id,
+                    'last_seen_upload_at': now,
+                    'updated_at': now,
+                }
+
+                set_on_insert_doc = {
+                    'created_at': now,
+                    'status': BillStatus.UNPAID,
+                    'paid_amount': 0.0,
+                    'remaining_amount': grand_total,
+                    'matched_payment_ids': [],
+                }
+
+                # Primary path: fast upsert by stable identity key.
+                try:
+                    result = await self.collection.update_one(
+                        {'invoice_key': invoice_key},
+                        {
+                            '$set': set_doc,
+                            '$setOnInsert': set_on_insert_doc,
                         },
-                        '$setOnInsert': {
-                            'created_at': now,
-                            'status': BillStatus.UNPAID,
-                            'paid_amount': 0.0,
-                            'remaining_amount': grand_total,
-                            'matched_payment_ids': [],
-                        }
-                    },
-                    upsert=True
-                )
+                        upsert=True
+                    )
+                except Exception as e:
+                    # Handle E11000 duplicate key error by consolidating duplicates
+                    if 'E11000' in str(e):
+                        logger.warning(f"E11000 duplicate key for {invoice_key}, consolidating...")
+                        await self._consolidate_duplicate_keys(invoice_key)
+                        # Retry the upsert after consolidation
+                        result = await self.collection.update_one(
+                            {'invoice_key': invoice_key},
+                            {
+                                '$set': set_doc,
+                                '$setOnInsert': set_on_insert_doc,
+                            },
+                            upsert=True
+                        )
+                    else:
+                        raise
 
                 if result.upserted_id:
+                    # If this was inserted, we may have matched a stale-key duplicate case.
+                    # Attempt to merge into an older legacy record and drop the just-inserted duplicate.
+                    legacy = await self._find_legacy_matching_bill(bill, exclude_id=result.upserted_id)
+                    if legacy and str(legacy.get('_id')) != str(result.upserted_id):
+                        await self.collection.update_one(
+                            {'_id': legacy['_id']},
+                            {
+                                '$set': set_doc,
+                                '$setOnInsert': set_on_insert_doc,
+                            },
+                            upsert=False,
+                        )
+                        await self.collection.delete_one({'_id': result.upserted_id})
+                        stats['updated_records'] += 1
+                        continue
+
                     stats['new_records'] += 1
                 elif result.modified_count > 0:
                     stats['updated_records'] += 1
