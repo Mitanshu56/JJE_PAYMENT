@@ -126,6 +126,7 @@ export const statementsAPI = {
     const query = params.toString()
     return api.get(`/api/upload/statements/match${query ? `?${query}` : ''}`)
   },
+  confirmNeft: (payload) => api.post('/api/upload/statements/neft-confirm', payload),
 }
 
 // Dashboard API

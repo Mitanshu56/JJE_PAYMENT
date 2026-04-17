@@ -207,7 +207,7 @@ const Dashboard = forwardRef(function Dashboard(_, ref) {
             <StatementTab />
           )}
           {activeTab === 'statement-match' && (
-            <StatementMatchTab />
+            <StatementMatchTab onDataChanged={loadDashboardData} />
           )}
         </div>
       </div>

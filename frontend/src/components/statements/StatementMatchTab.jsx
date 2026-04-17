@@ -73,7 +73,7 @@ function getGroupTone(isMatched) {
   }
 }
 
-export default function StatementMatchTab() {
+export default function StatementMatchTab({ onDataChanged }) {
   const [rows, setRows] = useState([])
   const [summary, setSummary] = useState(null)
   const [filters, setFilters] = useState({ page: 1, pageSize: PAGE_SIZE })
@@ -83,6 +83,7 @@ export default function StatementMatchTab() {
   const [partyDropdownOpen, setPartyDropdownOpen] = useState(false)
   const [matchFilter, setMatchFilter] = useState('all')
   const [loading, setLoading] = useState(false)
+  const [confirmingMap, setConfirmingMap] = useState({})
   const [error, setError] = useState('')
 
   const visiblePartyOptions = useMemo(() => {
@@ -204,6 +205,61 @@ export default function StatementMatchTab() {
     loadRows(filters)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.page])
+
+  const handleToggleInvoiceConfirm = async (group, invoice, checked) => {
+    const groupKey = String(group?.key || '')
+    const invoiceNo = String(invoice?.invoice_no || '').trim()
+    if (!groupKey || !invoiceNo) return
+
+    const actionKey = `${groupKey}::${invoiceNo}`
+    const groupRows = normalizeArray(group?.neftRows)
+    if (!groupRows.length) return
+
+    try {
+      setConfirmingMap((prev) => ({ ...prev, [actionKey]: true }))
+      setError('')
+
+      if (checked) {
+        const availableRow = groupRows.find((row) => !Boolean(row?.statement_entry?.neft_confirmed))
+        if (!availableRow?.statement_entry?.id) {
+          throw new Error('No unconfirmed NEFT row available for this invoice')
+        }
+
+        await statementsAPI.confirmNeft({
+          statement_entry_id: String(availableRow.statement_entry.id),
+          confirmed: true,
+          invoice_no: invoiceNo,
+        })
+      } else {
+        const invoicePaymentIds = new Set(normalizeArray(invoice?.matched_payment_ids).map((pid) => String(pid || '')))
+        const confirmedRow = groupRows.find((row) => {
+          if (!Boolean(row?.statement_entry?.neft_confirmed)) return false
+          const rowInvoiceNo = String(row?.statement_entry?.confirmed_invoice_no || '')
+          const rowPaymentId = String(row?.statement_entry?.confirmed_payment_id || '')
+          return rowInvoiceNo === invoiceNo || (rowPaymentId && invoicePaymentIds.has(rowPaymentId))
+        })
+
+        if (!confirmedRow?.statement_entry?.id) {
+          throw new Error('No confirmed NEFT entry found for this invoice')
+        }
+
+        await statementsAPI.confirmNeft({
+          statement_entry_id: String(confirmedRow.statement_entry.id),
+          confirmed: false,
+          invoice_no: invoiceNo,
+        })
+      }
+
+      await loadRows(filters)
+      if (typeof onDataChanged === 'function') {
+        await onDataChanged()
+      }
+    } catch (err) {
+      setError(formatApiError(err, 'Failed to update NEFT confirmation'))
+    } finally {
+      setConfirmingMap((prev) => ({ ...prev, [actionKey]: false }))
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -367,7 +423,12 @@ export default function StatementMatchTab() {
               const invoiceGrandTotal = Number(group?.matchedParty?.invoice_grand_total ?? sumMoney(invoices, 'grand_total'))
               const invoicePaidTotal = Number(group?.matchedParty?.invoice_paid_total ?? sumMoney(invoices, 'paid_amount'))
               const invoicePendingTotal = Number(group?.matchedParty?.invoice_pending_total ?? sumMoney(invoices, 'remaining_amount'))
-              const totalReceivedWithNeft = Math.min(invoiceGrandTotal, invoicePaidTotal + Number(group.totalDeposit || 0))
+              const confirmedNeftDeposit = normalizeArray(group?.neftRows).reduce(
+                (total, row) => total + (Boolean(row?.statement_entry?.neft_confirmed) ? Number(row?.statement_entry?.deposit || 0) : 0),
+                0,
+              )
+              const unconfirmedNeftDeposit = Math.max(0, Number(group.totalDeposit || 0) - confirmedNeftDeposit)
+              const totalReceivedWithNeft = Math.min(invoiceGrandTotal, invoicePaidTotal + unconfirmedNeftDeposit)
               const adjustedPendingTotal = Math.max(0, invoiceGrandTotal - totalReceivedWithNeft)
               const isSettledAfterNeft = adjustedPendingTotal <= 0.001
 
@@ -445,6 +506,7 @@ export default function StatementMatchTab() {
                       <table className="w-full text-sm">
                         <thead className={`border-b ${tone.invoiceHead}`}>
                           <tr>
+                            <th className="px-3 py-2 text-center">NEFT Received</th>
                             <th className="px-3 py-2 text-left">Invoice No</th>
                             <th className="px-3 py-2 text-left">Invoice Date</th>
                             <th className="px-3 py-2 text-right">Grand Total</th>
@@ -457,12 +519,30 @@ export default function StatementMatchTab() {
                         <tbody>
                           {invoices.map((invoice, idx) => {
                             const paymentIds = normalizeArray(invoice?.matched_payment_ids)
+                            const confirmedPaymentIds = new Set(
+                              normalizeArray(group?.neftRows)
+                                .filter((row) => Boolean(row?.statement_entry?.neft_confirmed))
+                                .map((row) => String(row?.statement_entry?.confirmed_payment_id || '')),
+                            )
+                            const isConfirmedByNeft = paymentIds.some((pid) => confirmedPaymentIds.has(String(pid || '')))
+                            const actionKey = `${group.key}::${String(invoice?.invoice_no || '').trim()}`
+                            const isUpdating = Boolean(confirmingMap[actionKey])
 
                             return (
                             <tr
                               key={invoice.id || invoice.invoice_no}
                               className={`border-t border-gray-100 ${idx % 2 === 0 ? tone.invoiceRowEven : tone.invoiceRowOdd}`}
                             >
+                              <td className="px-3 py-2 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={isConfirmedByNeft}
+                                  onChange={(e) => handleToggleInvoiceConfirm(group, invoice, e.target.checked)}
+                                  disabled={isUpdating}
+                                  title="Confirm NEFT payment for this invoice"
+                                  className="h-4 w-4 accent-green-600 disabled:opacity-50"
+                                />
+                              </td>
                               <td className="px-3 py-2 whitespace-nowrap">{invoice.invoice_no || '-'}</td>
                               <td className="px-3 py-2 whitespace-nowrap">{invoice.invoice_date || '-'}</td>
                               <td className="px-3 py-2 text-right">Rs. {formatMoney(invoice.grand_total)}</td>

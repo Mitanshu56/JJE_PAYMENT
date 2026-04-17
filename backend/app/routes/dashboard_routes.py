@@ -14,6 +14,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Matching & Dashboard"])
 
+STANDARD_PAYMENT_MODES = ['CASH', 'CHEQUE', 'UPI', 'NEFT']
+
+
+def _normalize_payment_mode(mode: str | None) -> str:
+    value = str(mode or '').strip().upper()
+    return value or 'UNKNOWN'
+
 
 @router.post("/match-payments")
 async def match_payments(db: AsyncIOMotorDatabase = Depends(get_db)):
@@ -98,7 +105,26 @@ async def get_dashboard_summary(
         partial_invoices = len([b for b in bills if b.get('status') == 'PARTIAL'])
         unpaid_invoices = len([b for b in bills if b.get('status') == 'UNPAID'])
         
-        payment_count = await payment_controller.count_payments()
+        payments = await payment_controller.get_payments(limit=100000)
+        payment_count = len(payments)
+
+        received_by_mode = {mode: 0.0 for mode in STANDARD_PAYMENT_MODES}
+        for payment in payments:
+            mode = _normalize_payment_mode(payment.get('payment_mode'))
+            received_amount = float(
+                payment.get('actual_received_amount')
+                if payment.get('actual_received_amount') is not None
+                else (payment.get('amount') or 0)
+            )
+            received_by_mode[mode] = float(received_by_mode.get(mode, 0.0)) + received_amount
+
+        received_by_mode_list = [
+            {
+                'mode': mode,
+                'amount': amount,
+            }
+            for mode, amount in sorted(received_by_mode.items(), key=lambda item: item[0])
+        ]
         
         return {
             'status': 'success',
@@ -113,7 +139,8 @@ async def get_dashboard_summary(
                     'unpaid': unpaid_invoices,
                     'total': len(bills)
                 },
-                'payment_records': payment_count
+                'payment_records': payment_count,
+                'received_by_mode': received_by_mode_list,
             }
         }
     except Exception as e:

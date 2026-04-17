@@ -5,6 +5,16 @@ export default function SummaryCards({ summary }) {
   const safeSummary = summary || {}
   const paidPercentage = Number(safeSummary.paid_percentage || 0)
   const invoiceStats = safeSummary.invoice_stats || {}
+  const receivedByMode = Array.isArray(safeSummary.received_by_mode) ? safeSummary.received_by_mode : []
+
+  const receivedModeRows = receivedByMode.length
+    ? receivedByMode
+    : [
+        { mode: 'CASH', amount: 0 },
+        { mode: 'CHEQUE', amount: 0 },
+        { mode: 'UPI', amount: 0 },
+        { mode: 'NEFT', amount: 0 },
+      ]
 
   const cards = [
     {
@@ -24,6 +34,7 @@ export default function SummaryCards({ summary }) {
       icon: TrendingUp,
       color: 'bg-green-500',
       change: `${paidPercentage.toFixed(1)}%`,
+      showReceivedModesPopup: true,
     },
     {
       title: 'Pending Amount',
@@ -52,8 +63,28 @@ export default function SummaryCards({ summary }) {
             <div className="flex justify-between items-start">
               <div>
                 <p className="text-gray-600 text-sm font-medium">{card.title}</p>
+                {card.showReceivedModesPopup && (
+                  <div className="relative mt-2 inline-block group">
+                    <div className="inline-flex items-center px-2 py-1 rounded-md border border-gray-200 text-xs font-medium text-gray-600 bg-gray-50 cursor-default">
+                      Mode-wise breakdown
+                    </div>
+                    <div className="pointer-events-none absolute left-0 top-full mt-2 w-72 rounded-lg border border-gray-200 bg-white shadow-xl p-3 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                      <div className="text-xs font-semibold text-gray-700 mb-2">Received by payment mode</div>
+                      <div className="space-y-1.5">
+                        {receivedModeRows.map((row) => (
+                          <div key={row.mode} className="flex items-center justify-between text-xs">
+                            <span className="text-gray-600">{row.mode}</span>
+                            <span className="font-semibold text-gray-900">
+                              ₹{Number(row.amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <h3 className="text-2xl font-bold text-gray-900 mt-2">{card.value}</h3>
-                {card.subtext && <p className="text-gray-500 text-xs mt-2">{card.subtext}</p>}
+                {card.subtext && <p className="text-gray-500 text-xs mt-2 leading-relaxed">{card.subtext}</p>}
                 {card.change && (
                   <p className="text-green-600 text-sm font-medium mt-2">{card.change}</p>
                 )}

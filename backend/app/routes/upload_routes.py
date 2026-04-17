@@ -9,6 +9,8 @@ import os
 import math
 import re
 from datetime import datetime, timezone
+from pydantic import BaseModel
+from bson import ObjectId
 from app.core.database import get_db
 from app.utils.excel_parser import InvoiceParser, BankStatementParser
 from app.utils.pdf_statement_parser import PDFStatementParser
@@ -290,6 +292,12 @@ def _serialize_datetime(value) -> str:
     return str(value)
 
 router = APIRouter(prefix="/api/upload", tags=["Upload"])
+
+
+class StatementNeftConfirmRequest(BaseModel):
+    statement_entry_id: str
+    confirmed: bool = True
+    invoice_no: str | None = None
 
 
 @router.post("/invoices")
@@ -850,6 +858,9 @@ async def get_statement_match(
                         'reference': row.get('reference') or '',
                         'month_key': row.get('month_key') or '',
                         'source_file': row.get('source_file') or '',
+                        'neft_confirmed': bool(row.get('neft_confirmed') or False),
+                        'confirmed_payment_id': row.get('confirmed_payment_id') or '',
+                        'confirmed_invoice_no': row.get('confirmed_invoice_no') or '',
                         'created_at': _serialize_datetime(row.get('created_at')),
                     },
                     'extracted_party_name': extracted_name,
@@ -887,4 +898,166 @@ async def get_statement_match(
         }
     except Exception as e:
         logger.error(f"✗ Error retrieving statement match rows: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post('/statements/neft-confirm')
+async def confirm_statement_neft_payment(
+    payload: StatementNeftConfirmRequest,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Confirm/unconfirm a NEFT statement row as an actual payment and update bill totals."""
+    try:
+        try:
+            entry_id = ObjectId(str(payload.statement_entry_id))
+        except Exception:
+            raise HTTPException(status_code=400, detail='Invalid statement entry id')
+
+        entry = await db['statement_entries'].find_one({'_id': entry_id})
+        if not entry:
+            raise HTTPException(status_code=404, detail='Statement entry not found')
+
+        narration = str(entry.get('narration') or '')
+        if 'NEFT' not in _normalize_party_text(narration):
+            raise HTTPException(status_code=400, detail='Selected row is not a NEFT entry')
+
+        bill_controller = BillController(db)
+        payment_controller = PaymentController(db)
+
+        if payload.confirmed:
+            if entry.get('neft_confirmed') and entry.get('confirmed_payment_id'):
+                return {
+                    'status': 'success',
+                    'message': 'NEFT entry already confirmed',
+                    'confirmed': True,
+                    'payment_id': entry.get('confirmed_payment_id'),
+                }
+
+            invoice_no = str(payload.invoice_no or '').strip()
+            if not invoice_no:
+                raise HTTPException(status_code=400, detail='Invoice number is required to confirm payment')
+
+            extracted_name = _extract_party_from_narration(narration)
+            if not extracted_name:
+                raise HTTPException(status_code=400, detail='Could not extract party from NEFT narration')
+
+            bills = await db['bills'].find({}).to_list(length=None)
+            party_lookup = _build_party_lookup(bills)
+            parties = list(party_lookup.values())
+
+            best_match = None
+            best_score = 0.0
+            for candidate in parties:
+                score = _party_match_score(
+                    extracted_name,
+                    candidate['party_norm'],
+                    candidate['party_tokens'],
+                )
+                if score > best_score:
+                    best_score = score
+                    best_match = candidate
+
+            if not best_match or best_score < 0.70:
+                raise HTTPException(status_code=400, detail='Could not confidently map NEFT party to invoice party')
+
+            amount = float(entry.get('deposit') or 0.0)
+            if amount <= 0:
+                raise HTTPException(status_code=400, detail='NEFT deposit amount must be greater than zero')
+
+            payment_id = f"NEFT-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')[:-3]}"
+            matched_party_name = best_match['party_name']
+
+            invoice_doc = await db['bills'].find_one({'invoice_no': invoice_no, 'party_name': matched_party_name})
+            if not invoice_doc:
+                raise HTTPException(status_code=400, detail='Selected invoice does not belong to matched NEFT party')
+
+            allocation = await bill_controller.apply_payment_to_bills(
+                amount=amount,
+                party_name=matched_party_name,
+                invoice_nos=[invoice_no],
+                payment_id=payment_id,
+            )
+
+            payment_doc = {
+                'payment_id': payment_id,
+                'party_name': matched_party_name,
+                'amount': amount,
+                'actual_received_amount': amount,
+                'payment_mode': 'NEFT',
+                'payment_date': entry.get('value_date') or datetime.utcnow(),
+                'reference': f"{((entry.get('reference') or '').strip() or narration)} | INV:{invoice_no}",
+                'notes': f"Statement NEFT confirmation for entry {payload.statement_entry_id} against invoice {invoice_no}",
+                'matched_invoice_nos': [a.get('invoice_no') for a in (allocation.get('allocations') or []) if a.get('invoice_no')],
+                'allocations': allocation.get('allocations') or [],
+                'applied_amount': float(allocation.get('applied_amount') or 0.0),
+                'unapplied_amount': float(allocation.get('remaining_amount') or 0.0),
+            }
+            await payment_controller.create_payment(payment_doc)
+
+            await db['statement_entries'].update_one(
+                {'_id': entry_id},
+                {
+                    '$set': {
+                        'neft_confirmed': True,
+                        'confirmed_payment_id': payment_id,
+                        'confirmed_party_name': matched_party_name,
+                        'confirmed_invoice_no': invoice_no,
+                        'confirmed_at': datetime.utcnow(),
+                    }
+                },
+            )
+
+            return {
+                'status': 'success',
+                'message': 'NEFT payment confirmed and applied',
+                'confirmed': True,
+                'payment_id': payment_id,
+                'party_name': matched_party_name,
+                'invoice_no': invoice_no,
+                'allocation': allocation,
+            }
+
+        payment_id = str(entry.get('confirmed_payment_id') or '').strip()
+        if payment_id:
+            payment = await payment_controller.get_payment(payment_id)
+            if payment:
+                allocations = payment.get('allocations') or []
+                if not allocations:
+                    allocations = [
+                        {
+                            'invoice_no': inv,
+                            'allocated_amount': 0.0,
+                        }
+                        for inv in (payment.get('matched_invoice_nos') or [])
+                    ]
+
+                await bill_controller.revert_payment_from_bills(
+                    payment_id=payment_id,
+                    allocations=allocations,
+                    party_name=payment.get('party_name'),
+                )
+                await payment_controller.delete_payment(payment_id)
+
+        await db['statement_entries'].update_one(
+            {'_id': entry_id},
+            {
+                '$set': {'neft_confirmed': False},
+                '$unset': {
+                    'confirmed_payment_id': '',
+                    'confirmed_party_name': '',
+                    'confirmed_invoice_no': '',
+                    'confirmed_at': '',
+                },
+            },
+        )
+
+        return {
+            'status': 'success',
+            'message': 'NEFT confirmation removed',
+            'confirmed': False,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"✗ Error confirming NEFT payment: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
