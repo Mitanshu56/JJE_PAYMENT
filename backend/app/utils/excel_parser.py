@@ -49,6 +49,8 @@ class InvoiceParser:
         self.file_path = file_path
         self.workbook = None
         self.invoices = []
+        self.parsed_dates = []  # Track parsed dates to detect format patterns
+        self.detected_format = None  # Track which format (mmdd or ddmm) has been explicitly detected
     
     def parse(self) -> List[Dict]:
         """
@@ -59,6 +61,10 @@ class InvoiceParser:
             List of extracted invoice dictionaries
         """
         try:
+            # Reset date tracking for this parse session
+            self.parsed_dates = []
+            self.detected_format = None
+            
             # Read all sheets and close workbook handle immediately after parsing.
             all_invoices = []
             with pd.ExcelFile(self.file_path) as xls:
@@ -156,6 +162,14 @@ class InvoiceParser:
     def _extract_block_invoices_from_sheet(self, df: pd.DataFrame, sheet_name: str) -> List[Dict]:
         """Extract invoice blocks where labels and values are separated by blank columns/rows."""
         rows = [[str(cell).strip() if pd.notna(cell) else "" for cell in row] for _, row in df.iterrows()]
+        
+        # Pre-pass: scan all rows for unambiguous dates to detect format
+        if not self.detected_format:
+            detected_fmt = self._detect_format_from_rows(rows)
+            if detected_fmt:
+                self.detected_format = detected_fmt
+                logger.info(f"Detected date format from sheet rows: {detected_fmt}")
+        
         invoices = []
         current = None
 
@@ -236,6 +250,34 @@ class InvoiceParser:
 
         finalize_current()
         return invoices
+
+    def _detect_format_from_rows(self, rows: List[List[str]]) -> Optional[str]:
+        """
+        Scan all rows for any dates with unambiguous format indicators.
+        Returns 'mmddyyyy' or 'ddmmyyyy' if detected, None otherwise.
+        """
+        for row in rows:
+            for cell in row:
+                if not cell or '/' not in cell:
+                    continue
+                
+                parts = cell.split('/')
+                if len(parts) != 3:
+                    continue
+                
+                try:
+                    num1, num2 = int(parts[0]), int(parts[1])
+                    
+                    # If first part > 12, it MUST be day (dd/mm format)
+                    if num1 > 12:
+                        return 'ddmmyyyy'
+                    # If second part > 12, it MUST be day (mm/dd format)
+                    if num2 > 12:
+                        return 'mmddyyyy'
+                except (ValueError, IndexError):
+                    continue
+        
+        return None
 
     def _extract_after_label_in_row(self, row_data: List[str], label_tokens: List[str]):
         """Find label in row and return first non-empty value to its right."""
@@ -331,6 +373,14 @@ class InvoiceParser:
         if not column_map:
             return []
 
+        # Pre-pass: detect date format from unambiguous dates in the column
+        if 'invoice_date' in column_map:
+            col_name = column_map['invoice_date']
+            detected_fmt = self._detect_format_from_column(df, col_name)
+            if detected_fmt:
+                self.detected_format = detected_fmt
+                logger.info(f"Detected date format from column: {detected_fmt}")
+
         invoices = []
         for _, row in df.iterrows():
             invoice = {'sheet': sheet_name}
@@ -354,6 +404,37 @@ class InvoiceParser:
 
         logger.info(f"Extracted {len(invoices)} table invoices from sheet: {sheet_name}")
         return invoices
+
+    def _detect_format_from_column(self, df: pd.DataFrame, date_col: str) -> Optional[str]:
+        """
+        Detect date format by scanning the date column for unambiguous dates.
+        Returns 'mmddyyyy' or 'ddmmyyyy' if detected, None otherwise.
+        """
+        for val in df[date_col]:
+            if pd.isna(val):
+                continue
+            
+            text = str(val).strip()
+            if '/' not in text:
+                continue
+            
+            parts = text.split('/')
+            if len(parts) != 3:
+                continue
+            
+            try:
+                num1, num2 = int(parts[0]), int(parts[1])
+                
+                # If first part > 12, it MUST be day (dd/mm format)
+                if num1 > 12:
+                    return 'ddmmyyyy'
+                # If second part > 12, it MUST be day (mm/dd format)
+                if num2 > 12:
+                    return 'mmddyyyy'
+            except (ValueError, IndexError):
+                continue
+        
+        return None
 
     def _map_table_columns(self, columns) -> Dict[str, str]:
         """Map incoming table headers to invoice fields."""
@@ -432,6 +513,10 @@ class InvoiceParser:
                     value = invoice_data[source_key]
                     cleaned[target_key] = self._normalize_field(target_key, value)
             
+            # Track parsed dates for context-aware format detection
+            if cleaned.get('invoice_date') and isinstance(cleaned['invoice_date'], datetime):
+                self.parsed_dates.append(cleaned['invoice_date'])
+            
             # Clean optional fields
             for source_key, target_key in optional_mapping.items():
                 if source_key in invoice_data:
@@ -488,18 +573,9 @@ class InvoiceParser:
             return str(value).strip()
         
         elif field_name == 'invoice_date':
-            try:
-                # Try multiple date formats
-                for fmt in ['%d-%m-%Y', '%d/%m/%Y', '%Y-%m-%d', '%d-%m-%y']:
-                    try:
-                        return datetime.strptime(str(value).strip(), fmt)
-                    except ValueError:
-                        continue
-                # Try pandas parsing as fallback
-                return pd.to_datetime(value)
-            except Exception as e:
-                logger.warning(f"Could not parse date: {value}")
-                return datetime.now()
+            # Use intelligent date parser that handles mixed formats
+            parsed = self._parse_date_with_context(value)
+            return parsed if parsed else datetime.now()
         
         elif field_name in ['net_amount', 'cgst', 'sgst', 'grand_total']:
             try:
@@ -524,6 +600,148 @@ class InvoiceParser:
         required = ['invoice_no', 'grand_total']
         has_required = all(field in invoice and invoice[field] not in (None, '') for field in required)
         return has_required
+    
+    def _parse_date_with_context(self, date_value) -> Optional[datetime]:
+        """
+        Intelligently parse dates that may be in mm/dd/yyyy or dd/mm/yyyy format.
+        Uses surrounding dates to validate which format is correct, with support for format transitions.
+        
+        Examples:
+            '06/05/2025' with context [19/05, 28/05] -> dd/mm/yyyy (6 May 2025)
+            '04/03/2025' followed by '16/04/2025' -> mm/dd then dd/mm (April 3, then April 16)
+        """
+        try:
+            # Handle already-parsed datetime objects
+            if isinstance(date_value, (datetime, pd.Timestamp)):
+                return pd.to_datetime(date_value).to_pydatetime() if isinstance(date_value, pd.Timestamp) else date_value
+            
+            text = str(date_value).strip()
+            
+            # Handle ISO format and unambiguous formats
+            try:
+                return datetime.strptime(text, '%Y-%m-%d')
+            except ValueError:
+                pass
+            
+            try:
+                return datetime.strptime(text, '%d-%m-%Y')
+            except ValueError:
+                pass
+            
+            try:
+                return datetime.strptime(text, '%d-%m-%y')
+            except ValueError:
+                pass
+            
+            # Handle ambiguous slash formats: detect mm/dd/yyyy vs dd/mm/yyyy
+            if '/' in text:
+                parts = text.split('/')
+                if len(parts) == 3:
+                    part1, part2, part3 = parts
+                    
+                    # Try to parse year (last part)
+                    try:
+                        year = int(part3)
+                        if year < 100:
+                            year += 2000 if year < 50 else 1900
+                        num1, num2 = int(part1), int(part2)
+                        
+                        # Both are valid day/month values (ambiguous case)
+                        if num1 > 12 or num2 > 12:
+                            # One is definitely month, other is definitely day
+                            if num1 > 12:
+                                # part1 is day, part2 is month -> dd/mm/yyyy
+                                return datetime(year, num2, num1)
+                            else:
+                                # part1 is month, part2 is day -> mm/dd/yyyy
+                                return datetime(year, num1, num2)
+                        else:
+                            # Ambiguous: both could be month or day
+                            # Use advanced context detection
+                            format_choice = self._detect_date_format_smart(num1, num2, year)
+                            if format_choice == 'mmddyyyy':
+                                # mm/dd/yyyy format
+                                return datetime(year, num1, num2)
+                            else:
+                                # dd/mm/yyyy format
+                                return datetime(year, num2, num1)
+                    except (ValueError, TypeError):
+                        pass
+            
+            # Fallback to pandas parsing
+            return pd.to_datetime(date_value).to_pydatetime()
+            
+        except Exception as e:
+            logger.warning(f"Could not parse date: {date_value} - {str(e)}")
+            return None
+    
+    def _detect_date_format_smart(self, first: int, second: int, year: int) -> str:
+        """
+        Advanced format detection that handles both single-format and mixed-format datasets.
+        For ambiguous dates, tries both interpretations and picks the one that maintains
+        the best chronological order.
+        
+        This enables handling files with mixed date formats by dynamically switching
+        formats to maintain chronological continuity.
+        """
+        # Candidate interpretations
+        mmdd_candidate = datetime(year, first, second)
+        ddmm_candidate = datetime(year, second, first)
+        
+        if not self.parsed_dates:
+            # No context - default to mm/dd/yyyy (common for US/mixed formats)
+            return 'mmddyyyy'
+        
+        recent = sorted(self.parsed_dates[-10:])
+        
+        # Calculate scores for both interpretations
+        mmdd_score = self._calculate_format_score(mmdd_candidate, recent)
+        ddmm_score = self._calculate_format_score(ddmm_candidate, recent)
+        
+        logger.debug(f"Format: {first}/{second}/{year} -> mmdd={mmdd_score:.1f}, ddmm={ddmm_score:.1f}")
+        
+        # Pick the format with better chronological fit
+        # Only use detected_format if the scores are very close
+        if abs(mmdd_score - ddmm_score) < 3:  # Very close call
+            return self.detected_format if self.detected_format else 'mmddyyyy'
+        
+        # Otherwise, strongly prefer the format that maintains chronological order
+        return 'mmddyyyy' if mmdd_score > ddmm_score else 'ddmmyyyy'
+    
+    def _calculate_format_score(self, test_date: datetime, recent_dates: list) -> float:
+        """
+        Calculate a score for how well a test_date fits with recent dates.
+        Strongly prefers dates that maintain chronological order without large gaps.
+        """
+        if not recent_dates:
+            return 50
+        
+        min_date = recent_dates[0]
+        max_date = recent_dates[-1]
+        
+        # Perfect score if within existing range
+        if min_date <= test_date <= max_date:
+            return 100
+        
+        # Check chronological continuation (moving forward)
+        if test_date > max_date:
+            days_after = (test_date - max_date).days
+            # Strongly prefer reasonable forward progression (within 30 days)
+            if days_after <= 30:
+                return 90 + (30 - days_after) * 0.3  # 90-100
+            elif days_after <= 90:
+                return 70 + (90 - days_after) * 0.2  # 70-80
+            elif days_after <= 365:
+                return 40
+            else:
+                return 10
+        
+        # Heavily penalize going backward (format conflict indicator)
+        days_before = (min_date - test_date).days
+        if days_before > 0:
+            # Going backward is bad - very low score
+            return max(0, 20 - days_before * 2)
+
 
 
 class BankStatementParser:

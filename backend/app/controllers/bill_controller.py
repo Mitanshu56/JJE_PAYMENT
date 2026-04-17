@@ -319,3 +319,77 @@ class BillController:
             'remaining_amount': max(0.0, remaining_amount),
             'allocations': allocations,
         }
+
+    async def revert_payment_from_bills(
+        self,
+        *,
+        payment_id: str,
+        allocations: List[dict],
+        party_name: Optional[str] = None,
+    ) -> dict:
+        """Revert bill amounts previously allocated by a payment."""
+        reverted_total = 0.0
+        reverted_allocations = []
+
+        for allocation in allocations or []:
+            allocation_amount = float(allocation.get('allocated_amount') or 0.0)
+            if allocation_amount <= 0:
+                continue
+
+            bill = None
+            bill_id = allocation.get('bill_id')
+            invoice_no = allocation.get('invoice_no')
+
+            if bill_id:
+                try:
+                    bill = await self.collection.find_one({'_id': ObjectId(str(bill_id))})
+                except Exception:
+                    bill = None
+
+            if not bill and invoice_no:
+                invoice_query = {'invoice_no': invoice_no}
+                if party_name:
+                    invoice_query['party_name'] = party_name
+                bill = await self.collection.find_one(invoice_query)
+
+            if not bill:
+                continue
+
+            grand_total = float(bill.get('grand_total') or 0.0)
+            paid_amount = float(bill.get('paid_amount') or 0.0)
+            new_paid_amount = max(0.0, paid_amount - allocation_amount)
+            new_remaining = max(0.0, grand_total - new_paid_amount)
+
+            if new_remaining == 0:
+                new_status = BillStatus.PAID
+            elif new_paid_amount > 0:
+                new_status = BillStatus.PARTIAL
+            else:
+                new_status = BillStatus.UNPAID
+
+            matched_payment_ids = [pid for pid in (bill.get('matched_payment_ids') or []) if pid != payment_id]
+
+            await self.collection.update_one(
+                {'_id': bill['_id']},
+                {
+                    '$set': {
+                        'paid_amount': new_paid_amount,
+                        'remaining_amount': new_remaining,
+                        'status': new_status,
+                        'matched_payment_ids': matched_payment_ids,
+                        'updated_at': datetime.utcnow(),
+                    }
+                },
+            )
+
+            reverted_total += min(paid_amount, allocation_amount)
+            reverted_allocations.append({
+                'bill_id': str(bill['_id']),
+                'invoice_no': bill.get('invoice_no'),
+                'reverted_amount': min(paid_amount, allocation_amount),
+            })
+
+        return {
+            'reverted_amount': reverted_total,
+            'allocations': reverted_allocations,
+        }

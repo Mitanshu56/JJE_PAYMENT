@@ -2,6 +2,21 @@ import React, { useState, useEffect } from 'react'
 import { billsAPI } from '../../services/api'
 import { Trash2, Eye } from 'lucide-react'
 
+const MONTH_OPTIONS = [
+  { label: 'January', value: '1' },
+  { label: 'February', value: '2' },
+  { label: 'March', value: '3' },
+  { label: 'April', value: '4' },
+  { label: 'May', value: '5' },
+  { label: 'June', value: '6' },
+  { label: 'July', value: '7' },
+  { label: 'August', value: '8' },
+  { label: 'September', value: '9' },
+  { label: 'October', value: '10' },
+  { label: 'November', value: '11' },
+  { label: 'December', value: '12' },
+]
+
 export default function BillsTable() {
   const [bills, setBills] = useState([])
   const [totalBills, setTotalBills] = useState(0)
@@ -12,6 +27,7 @@ export default function BillsTable() {
   const [filters, setFilters] = useState({
     status: '',
     party: '',
+    month: '',
   })
 
   const totalPages = Math.max(1, Math.ceil(totalBills / pageSize))
@@ -22,13 +38,19 @@ export default function BillsTable() {
 
   useEffect(() => {
     setPage(1)
-  }, [filters.status, filters.party, pageSize])
+  }, [filters.status, filters.party, filters.month, pageSize])
 
   const loadBills = async () => {
     try {
       setLoading(true)
       const skip = (page - 1) * pageSize
-      const res = await billsAPI.getAll(skip, pageSize, filters.status || null, filters.party || null)
+      const res = await billsAPI.getAll(
+        skip,
+        pageSize,
+        filters.status || null,
+        filters.party || null,
+        filters.month || null,
+      )
       setBills(res.data.bills)
       setTotalBills(res.data.total || 0)
     } catch (err) {
@@ -62,6 +84,16 @@ export default function BillsTable() {
     }
   }
 
+  const formatDisplayDate = (value) => {
+    if (!value) return '-'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    const dd = String(date.getDate()).padStart(2, '0')
+    const mm = String(date.getMonth() + 1).padStart(2, '0')
+    const yyyy = date.getFullYear()
+    return `${dd}/${mm}/${yyyy}`
+  }
+
   return (
     <div className="space-y-4">
       {/* Filters */}
@@ -82,6 +114,16 @@ export default function BillsTable() {
           <option value="PAID">Paid</option>
           <option value="PARTIAL">Partial</option>
           <option value="UNPAID">Unpaid</option>
+        </select>
+        <select
+          value={filters.month}
+          onChange={(e) => setFilters({ ...filters, month: e.target.value })}
+          className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
+        >
+          <option value="">All Months</option>
+          {MONTH_OPTIONS.map((month) => (
+            <option key={month.value} value={month.value}>{month.label}</option>
+          ))}
         </select>
       </div>
 
@@ -152,7 +194,7 @@ export default function BillsTable() {
                     {bill.gst_no || 'N/A'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                    {new Date(bill.invoice_date).toLocaleDateString()}
+                    {formatDisplayDate(bill.invoice_date)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">
                     ₹{(bill.net_amount || 0).toLocaleString()}

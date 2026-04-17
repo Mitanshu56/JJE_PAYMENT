@@ -1,11 +1,40 @@
-import React, { useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import Dashboard from './pages/Dashboard'
+import Login from './pages/Login'
 import FileUpload from './components/FileUpload'
 import Header from './components/Header'
+import { authAPI, authStorage } from './services/api'
 import './index.css'
 
 function App() {
   const dashboardRef = useRef(null)
+  const [authReady, setAuthReady] = useState(false)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [currentUser, setCurrentUser] = useState('')
+
+  useEffect(() => {
+    const verifyAuth = async () => {
+      const token = authStorage.getToken()
+      if (!token) {
+        setAuthReady(true)
+        return
+      }
+
+      try {
+        const res = await authAPI.me()
+        setIsAuthenticated(true)
+        setCurrentUser(res?.data?.username || '')
+      } catch {
+        authStorage.clearToken()
+        setIsAuthenticated(false)
+        setCurrentUser('')
+      } finally {
+        setAuthReady(true)
+      }
+    }
+
+    verifyAuth()
+  }, [])
 
   const handleUploadClick = () => {
     const uploadModal = document.getElementById('upload-modal')
@@ -23,9 +52,32 @@ function App() {
     dashboardRef.current?.reload?.()
   }
 
+  const handleLoginSuccess = (username) => {
+    setIsAuthenticated(true)
+    setCurrentUser(username || '')
+  }
+
+  const handleLogout = () => {
+    authStorage.clearToken()
+    setIsAuthenticated(false)
+    setCurrentUser('')
+  }
+
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="text-slate-600 text-sm">Checking login session...</div>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated) {
+    return <Login onLoginSuccess={handleLoginSuccess} />
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header onUploadClick={handleUploadClick} />
+      <Header onUploadClick={handleUploadClick} onLogout={handleLogout} currentUser={currentUser} />
 
       <main className="max-w-7xl mx-auto p-4 md:p-6">
         <Dashboard ref={dashboardRef} />

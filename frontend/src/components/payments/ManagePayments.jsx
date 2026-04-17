@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { paymentsAPI } from '../../services/api'
 
 const PAYMENT_MODES = ['CASH', 'CHEQUE', 'NEFT', 'UPI']
@@ -25,6 +25,20 @@ export default function ManagePayments({ bills, onPaymentSaved }) {
   const [historyPayments, setHistoryPayments] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState(null)
+  const [editingPayment, setEditingPayment] = useState(null)
+  const [editSelectedInvoices, setEditSelectedInvoices] = useState({})
+  const [editPaymentMode, setEditPaymentMode] = useState('CASH')
+  const [editAmount, setEditAmount] = useState('')
+  const [editActualReceivedAmount, setEditActualReceivedAmount] = useState('')
+  const [editReference, setEditReference] = useState('')
+  const [editNotes, setEditNotes] = useState('')
+  const [editChequeDate, setEditChequeDate] = useState(getTodayISO())
+  const [editPartyBankName, setEditPartyBankName] = useState('')
+  const [editChequeAmount, setEditChequeAmount] = useState('')
+  const [editDepositDate, setEditDepositDate] = useState(getTodayISO())
+  const [editUpiId, setEditUpiId] = useState('')
+  const [editUpiTransferDate, setEditUpiTransferDate] = useState(getTodayISO())
+  const [editError, setEditError] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
@@ -64,6 +78,22 @@ export default function ManagePayments({ bills, onPaymentSaved }) {
     return partyGroups.filter((p) => p.partyName.toLowerCase().includes(term))
   }, [partyGroups, partySearch])
 
+  useEffect(() => {
+    if (selectedParty?.partyName) {
+      const updatedSelectedParty = partyGroups.find((p) => p.partyName === selectedParty.partyName)
+      if (updatedSelectedParty && updatedSelectedParty !== selectedParty) {
+        setSelectedParty(updatedSelectedParty)
+      }
+    }
+
+    if (historyParty?.partyName) {
+      const updatedHistoryParty = partyGroups.find((p) => p.partyName === historyParty.partyName)
+      if (updatedHistoryParty && updatedHistoryParty !== historyParty) {
+        setHistoryParty(updatedHistoryParty)
+      }
+    }
+  }, [partyGroups, selectedParty, historyParty])
+
   const openReceivePopup = async (party) => {
     setSelectedParty(party)
     setSelectedInvoices({})
@@ -79,11 +109,40 @@ export default function ManagePayments({ bills, onPaymentSaved }) {
     setNotes('')
     setError(null)
 
+    setPartyPayments(await fetchPaymentsByParty(party.partyName))
+  }
+
+  const fetchPaymentsByParty = async (partyName) => {
     try {
-      const res = await paymentsAPI.getByParty(party.partyName)
-      setPartyPayments(Array.isArray(res?.data?.payments) ? res.data.payments : [])
+      const res = await paymentsAPI.getByParty(partyName)
+      return Array.isArray(res?.data?.payments) ? res.data.payments : []
     } catch (e) {
-      setPartyPayments([])
+      return []
+    }
+  }
+
+  const sortPaymentsByDateDesc = (payments) => {
+    return [...payments].sort((a, b) => {
+      const aTime = new Date(a?.payment_date || a?.created_at || 0).getTime()
+      const bTime = new Date(b?.payment_date || b?.created_at || 0).getTime()
+      return bTime - aTime
+    })
+  }
+
+  const syncAfterPaymentMutation = async (partyName) => {
+    await Promise.resolve(onPaymentSaved?.())
+
+    if (!partyName) return
+
+    const refreshedPayments = await fetchPaymentsByParty(partyName)
+    const sortedPayments = sortPaymentsByDateDesc(refreshedPayments)
+
+    if (selectedParty?.partyName === partyName) {
+      setPartyPayments(sortedPayments)
+    }
+
+    if (historyParty?.partyName === partyName) {
+      setHistoryPayments(sortedPayments)
     }
   }
 
@@ -108,13 +167,8 @@ export default function ManagePayments({ bills, onPaymentSaved }) {
     setHistoryError(null)
 
     try {
-      const res = await paymentsAPI.getByParty(party.partyName)
-      const payments = Array.isArray(res?.data?.payments) ? res.data.payments : []
-      const sortedPayments = [...payments].sort((a, b) => {
-        const aTime = new Date(a?.payment_date || a?.created_at || 0).getTime()
-        const bTime = new Date(b?.payment_date || b?.created_at || 0).getTime()
-        return bTime - aTime
-      })
+      const payments = await fetchPaymentsByParty(party.partyName)
+      const sortedPayments = sortPaymentsByDateDesc(payments)
       setHistoryPayments(sortedPayments)
     } catch (e) {
       setHistoryPayments([])
@@ -130,6 +184,216 @@ export default function ManagePayments({ bills, onPaymentSaved }) {
     setHistoryPayments([])
     setHistoryLoading(false)
     setHistoryError(null)
+    setEditingPayment(null)
+    setEditSelectedInvoices({})
+    setEditError(null)
+  }
+
+  const getEditingAllocationMap = (payment) => {
+    const map = {}
+    if (!payment) return map
+
+    const allocations = Array.isArray(payment?.allocations) ? payment.allocations : []
+    if (allocations.length > 0) {
+      for (const allocation of allocations) {
+        const key = allocation?.bill_id || allocation?.invoice_no
+        if (!key) continue
+        map[key] = Number(allocation?.allocated_amount || 0)
+      }
+      return map
+    }
+
+    const invoiceNos = Array.isArray(payment?.matched_invoice_nos) ? payment.matched_invoice_nos : []
+    const fallbackAmount = Number(payment?.applied_amount || payment?.amount || 0)
+    if (invoiceNos.length > 0 && fallbackAmount > 0) {
+      const splitAmount = fallbackAmount / invoiceNos.length
+      for (const inv of invoiceNos) {
+        if (!inv) continue
+        map[inv] = splitAmount
+      }
+    }
+
+    return map
+  }
+
+  const openEditPaymentPopup = (payment) => {
+    const invoiceNos = Array.isArray(payment?.matched_invoice_nos) ? payment.matched_invoice_nos : []
+    const selected = {}
+    for (const bill of historyParty?.bills || []) {
+      if (invoiceNos.includes(bill?.invoice_no)) {
+        selected[bill._id] = true
+      }
+    }
+
+    setEditingPayment(payment)
+    setEditSelectedInvoices(selected)
+    setEditPaymentMode((payment?.payment_mode || 'CASH').toUpperCase())
+    setEditAmount(String(payment?.amount ?? ''))
+    setEditActualReceivedAmount(String(payment?.actual_received_amount ?? payment?.amount ?? ''))
+    setEditReference(payment?.reference || '')
+    setEditNotes(payment?.notes || '')
+    setEditChequeDate((payment?.cheque_date || '').slice(0, 10) || getTodayISO())
+    setEditPartyBankName(payment?.party_bank_name || '')
+    setEditChequeAmount(String(payment?.cheque_amount ?? payment?.actual_received_amount ?? payment?.amount ?? ''))
+    setEditDepositDate((payment?.deposit_date || '').slice(0, 10) || getTodayISO())
+    setEditUpiId(payment?.upi_id || '')
+    setEditUpiTransferDate((payment?.upi_transfer_date || '').slice(0, 10) || getTodayISO())
+    setEditError(null)
+  }
+
+  const closeEditPaymentPopup = () => {
+    setEditingPayment(null)
+    setEditSelectedInvoices({})
+    setEditError(null)
+  }
+
+  const toggleEditInvoice = (billId) => {
+    setEditSelectedInvoices((prev) => ({ ...prev, [billId]: !prev[billId] }))
+  }
+
+  const editDisplayBills = useMemo(() => {
+    const partyBills = historyParty?.bills || []
+    if (!editingPayment) return []
+
+    const matchedInvoiceNos = new Set(
+      (Array.isArray(editingPayment?.matched_invoice_nos) ? editingPayment.matched_invoice_nos : []).filter(Boolean)
+    )
+
+    if (matchedInvoiceNos.size === 0) {
+      return []
+    }
+
+    return partyBills.filter((bill) => matchedInvoiceNos.has(bill?.invoice_no))
+  }, [historyParty, editingPayment])
+
+  const editSelectedBills = useMemo(() => {
+    return editDisplayBills.filter((bill) => !!editSelectedInvoices[bill._id])
+  }, [editSelectedInvoices, editDisplayBills])
+
+  const editAllocationMap = useMemo(() => getEditingAllocationMap(editingPayment), [editingPayment])
+
+  const editSelectedDueAmount = useMemo(() => {
+    return editSelectedBills.reduce((sum, bill) => {
+      const keyById = bill?._id
+      const keyByInvoice = bill?.invoice_no
+      const previousAllocated = Number(editAllocationMap[keyById] || editAllocationMap[keyByInvoice] || 0)
+      const dueNow = Number(bill?.remaining_amount ?? bill?.grand_total ?? 0)
+      return sum + dueNow + previousAllocated
+    }, 0)
+  }, [editSelectedBills, editAllocationMap])
+
+  const handleUpdatePayment = async () => {
+    if (!editingPayment || !historyParty) return
+
+    if (editSelectedBills.length === 0) {
+      setEditError('Select at least one invoice for this payment.')
+      return
+    }
+
+    const amountValue = Number(editAmount)
+    if (!amountValue || amountValue <= 0) {
+      setEditError('Enter a valid payment amount.')
+      return
+    }
+
+    const actualAmountValue = Number(editActualReceivedAmount)
+    if (!actualAmountValue || actualAmountValue <= 0) {
+      setEditError('Enter actual received amount.')
+      return
+    }
+
+    if (editPaymentMode === 'CHEQUE') {
+      if (!editPartyBankName.trim()) {
+        setEditError('Enter party bank name for cheque payment.')
+        return
+      }
+      if (!editChequeDate || !editDepositDate) {
+        setEditError('Select cheque and deposit dates.')
+        return
+      }
+      const chequeAmountValue = Number(editChequeAmount)
+      if (!chequeAmountValue || chequeAmountValue <= 0) {
+        setEditError('Enter cheque amount.')
+        return
+      }
+    }
+
+    if (editPaymentMode === 'UPI') {
+      if (!editUpiTransferDate) {
+        setEditError('Select UPI transfer date.')
+        return
+      }
+      if (editUpiTransferDate > getTodayISO()) {
+        setEditError('UPI transfer date cannot be in the future.')
+        return
+      }
+    }
+
+    try {
+      const shouldUpdate = window.confirm(
+        'Caution: Updating this payment will recalculate bill totals, statuses, and payment history. Continue?'
+      )
+      if (!shouldUpdate) {
+        return
+      }
+
+      setSaving(true)
+      setEditError(null)
+
+      await paymentsAPI.updateManual(editingPayment.payment_id, {
+        amount: amountValue,
+        actual_received_amount: actualAmountValue,
+        payment_mode: editPaymentMode,
+        reference: editReference || null,
+        notes: editNotes || null,
+        invoice_nos: editSelectedBills.map((b) => b.invoice_no),
+        bill_ids: editSelectedBills.map((b) => b._id),
+        cheque_date: editPaymentMode === 'CHEQUE' ? editChequeDate : null,
+        party_bank_name: editPaymentMode === 'CHEQUE' ? editPartyBankName : null,
+        cheque_amount: editPaymentMode === 'CHEQUE' ? Number(editChequeAmount || 0) : null,
+        deposit_date: editPaymentMode === 'CHEQUE' ? editDepositDate : null,
+        upi_id: editPaymentMode === 'UPI' ? editUpiId.trim() : null,
+        upi_transfer_date: editPaymentMode === 'UPI' ? editUpiTransferDate : null,
+      })
+
+      closeEditPaymentPopup()
+
+      syncAfterPaymentMutation(historyParty.partyName).catch((err) => {
+        console.error('Background refresh failed after update payment:', err)
+      })
+    } catch (e) {
+      const detail = e?.response?.data?.detail
+      setEditError(typeof detail === 'string' ? detail : 'Failed to update payment.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeletePayment = async () => {
+    if (!editingPayment || !editingPayment.payment_id || !historyParty) return
+
+    const shouldDelete = window.confirm(
+      'Caution: This will permanently delete this payment and revert its bill allocations. This action cannot be undone. Continue?'
+    )
+    if (!shouldDelete) {
+      return
+    }
+
+    try {
+      setSaving(true)
+      setEditError(null)
+
+      await paymentsAPI.delete(editingPayment.payment_id)
+
+      await syncAfterPaymentMutation(historyParty.partyName)
+
+      closeEditPaymentPopup()
+    } catch (e) {
+      const detail = e?.response?.data?.detail
+      setEditError(typeof detail === 'string' ? detail : 'Failed to delete payment.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const selectedBills = useMemo(() => {
@@ -205,7 +469,10 @@ export default function ManagePayments({ bills, onPaymentSaved }) {
     if (!value) return '-'
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return value
-    return date.toLocaleDateString('en-IN')
+    const dd = String(date.getDate()).padStart(2, '0')
+    const mm = String(date.getMonth() + 1).padStart(2, '0')
+    const yyyy = date.getFullYear()
+    return `${dd}/${mm}/${yyyy}`
   }
 
   const toggleInvoice = (billId) => {
@@ -293,7 +560,10 @@ export default function ManagePayments({ bills, onPaymentSaved }) {
       })
 
       closeReceivePopup()
-      onPaymentSaved?.()
+
+      syncAfterPaymentMutation(selectedParty.partyName).catch((err) => {
+        console.error('Background refresh failed after save payment:', err)
+      })
     } catch (e) {
       const detail = e?.response?.data?.detail
       setError(typeof detail === 'string' ? detail : 'Failed to save payment.')
@@ -397,6 +667,7 @@ export default function ManagePayments({ bills, onPaymentSaved }) {
                         <th className="px-3 py-2 text-right">Allocated Amount</th>
                         <th className="px-3 py-2 text-right">Actual Received</th>
                         <th className="px-3 py-2 text-left">Reference</th>
+                        <th className="px-3 py-2 text-center">Action</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -426,6 +697,14 @@ export default function ManagePayments({ bills, onPaymentSaved }) {
                             <td className="px-3 py-2 text-right">₹{Number(p.amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
                             <td className="px-3 py-2 text-right">₹{Number(p.actual_received_amount || p.amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
                             <td className="px-3 py-2">{p.reference || '-'}</td>
+                            <td className="px-3 py-2 text-center">
+                              <button
+                                onClick={() => openEditPaymentPopup(p)}
+                                className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 rounded-md text-xs font-medium"
+                              >
+                                Edit
+                              </button>
+                            </td>
                           </tr>
                         )
                       })}
@@ -433,6 +712,254 @@ export default function ManagePayments({ bills, onPaymentSaved }) {
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingPayment && historyParty && (
+        <div className="fixed inset-0 z-[70] bg-black bg-opacity-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl overflow-hidden">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Edit Payment - {editingPayment.payment_id}
+              </h3>
+              <button onClick={closeEditPaymentPopup} className="text-sm text-gray-500 hover:text-gray-700">Close</button>
+            </div>
+
+            <div className="p-6 space-y-4 max-h-[75vh] overflow-auto">
+              {editError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-md text-sm">
+                  {editError}
+                </div>
+              )}
+
+              <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
+                <div className="text-sm text-amber-900 font-medium">Editing Selected Payment Row</div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-2 text-sm text-amber-800">
+                  <div>
+                    <span className="font-medium">Payment ID:</span> {editingPayment?.payment_id || '-'}
+                  </div>
+                  <div>
+                    <span className="font-medium">Date:</span> {formatDisplayDate(editingPayment?.payment_date || editingPayment?.created_at)}
+                  </div>
+                  <div>
+                    <span className="font-medium">Mode:</span> {(editingPayment?.payment_mode || '-').toUpperCase()}
+                  </div>
+                  <div>
+                    <span className="font-medium">Current Amount:</span> ₹{Number(editingPayment?.amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Payment Mode</label>
+                  <select
+                    value={editPaymentMode}
+                    onChange={(e) => setEditPaymentMode(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    {PAYMENT_MODES.map((mode) => (
+                      <option key={mode} value={mode}>{mode}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Editable Selected Due</label>
+                  <input
+                    type="text"
+                    value={editSelectedDueAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                    readOnly
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Allocated Amount</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editAmount}
+                    onChange={(e) => setEditAmount(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Actual Received Amount</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editActualReceivedAmount}
+                    onChange={(e) => setEditActualReceivedAmount(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  />
+                </div>
+              </div>
+
+              {editPaymentMode === 'CHEQUE' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Cheque Date</label>
+                    <input
+                      type="date"
+                      value={editChequeDate}
+                      onChange={(e) => setEditChequeDate(e.target.value)}
+                      max={getTodayISO()}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Party Bank Name</label>
+                    <input
+                      type="text"
+                      value={editPartyBankName}
+                      onChange={(e) => setEditPartyBankName(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Cheque Amount</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={editChequeAmount}
+                      onChange={(e) => setEditChequeAmount(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Deposit Date</label>
+                    <input
+                      type="date"
+                      value={editDepositDate}
+                      onChange={(e) => setEditDepositDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {editPaymentMode === 'UPI' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">UPI ID</label>
+                    <input
+                      type="text"
+                      value={editUpiId}
+                      onChange={(e) => setEditUpiId(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">UPI Transfer Date</label>
+                    <input
+                      type="date"
+                      value={editUpiTransferDate}
+                      onChange={(e) => setEditUpiTransferDate(e.target.value)}
+                      max={getTodayISO()}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Reference</label>
+                  <input
+                    type="text"
+                    value={editReference}
+                    onChange={(e) => setEditReference(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                  <input
+                    type="text"
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  />
+                </div>
+              </div>
+
+              <div className="overflow-x-auto border border-gray-200 rounded-md">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Select</th>
+                      <th className="px-3 py-2 text-left">Invoice No</th>
+                      <th className="px-3 py-2 text-left">Status</th>
+                      <th className="px-3 py-2 text-right">Due Now</th>
+                      <th className="px-3 py-2 text-right">Previous Allocated</th>
+                      <th className="px-3 py-2 text-right">Editable Due</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {editDisplayBills.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-3 py-4 text-center text-gray-500">
+                          No matched invoices found for this payment row.
+                        </td>
+                      </tr>
+                    ) : editDisplayBills.map((bill) => {
+                      const dueNow = Number(bill?.remaining_amount ?? bill?.grand_total ?? 0)
+                      const prevAllocated = Number(editAllocationMap[bill?._id] || editAllocationMap[bill?.invoice_no] || 0)
+                      const editableDue = dueNow + prevAllocated
+                      return (
+                        <tr key={`edit-${bill._id}`} className={`border-t border-gray-100 ${editSelectedInvoices[bill._id] ? 'bg-amber-50' : ''}`}>
+                          <td className="px-3 py-2">
+                            <input
+                              type="checkbox"
+                              checked={!!editSelectedInvoices[bill._id]}
+                              onChange={() => toggleEditInvoice(bill._id)}
+                            />
+                          </td>
+                          <td className="px-3 py-2 font-medium">{bill.invoice_no}</td>
+                          <td className="px-3 py-2">{bill.status || 'UNPAID'}</td>
+                          <td className="px-3 py-2 text-right">₹{dueNow.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
+                          <td className="px-3 py-2 text-right">₹{prevAllocated.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
+                          <td className="px-3 py-2 text-right font-medium">₹{editableDue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={handleDeletePayment}
+                disabled={saving}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white rounded-md font-medium mr-auto"
+              >
+                {saving ? 'Working...' : 'Delete Payment'}
+              </button>
+              <button
+                onClick={closeEditPaymentPopup}
+                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUpdatePayment}
+                disabled={saving}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white rounded-md font-medium"
+              >
+                {saving ? 'Working...' : 'Update Payment'}
+              </button>
             </div>
           </div>
         </div>

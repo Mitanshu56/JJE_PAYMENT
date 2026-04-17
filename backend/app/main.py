@@ -1,12 +1,12 @@
-"""
-Main FastAPI application
-"""
-from fastapi import FastAPI
+"""Main FastAPI application."""
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.core.config import settings, logger
+from app.core.auth import decode_token
 from app.core.database import connect_db, close_db
-from app.routes import upload_routes, bill_routes, payment_routes, dashboard_routes
+from app.routes import auth_routes, upload_routes, bill_routes, payment_routes, dashboard_routes
 
 
 @asynccontextmanager
@@ -40,7 +40,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Require auth token for protected API endpoints."""
+    path = request.url.path
+
+    # Let CORS preflight pass without auth header.
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    public_paths = {
+        "/api/auth/login",
+        "/api/health",
+    }
+
+    if path.startswith("/api") and path not in public_paths:
+        auth_header = request.headers.get("authorization", "")
+        token = ""
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+
+        claims = decode_token(token)
+        if not claims:
+            return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+
+        request.state.user = claims.get("sub")
+
+    return await call_next(request)
+
 # Include routers
+app.include_router(auth_routes.router)
 app.include_router(upload_routes.router)
 app.include_router(bill_routes.router)
 app.include_router(payment_routes.router)

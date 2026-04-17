@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     FUZZY_MATCH_THRESHOLD: int = 80  # 80% similarity
     DATE_PROXIMITY_DAYS: int = 7  # Match payments within 7 days
     AMOUNT_TOLERANCE_PERCENT: float = 0.5  # 0.5% tolerance in amount matching
+
+    # Authentication
+    AUTH_USERNAME: str = "JJE123"
+    AUTH_PASSWORD: str = "meeT@meet"
+    AUTH_SECRET_KEY: str = "change-this-secret-in-production"
+    AUTH_TOKEN_EXPIRE_HOURS: int = 24
     
     class Config:
         env_file = ".env"

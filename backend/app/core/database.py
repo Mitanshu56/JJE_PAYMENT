@@ -70,6 +70,12 @@ async def create_indexes():
         logs_col = db["upload_logs"]
         await logs_col.create_index("created_at")
         await logs_col.create_index("file_name")
+
+        # Statement entries indexes
+        statements_col = db["statement_entries"]
+        await statements_col.create_index("month_key")
+        await statements_col.create_index("value_date")
+        await statements_col.create_index("upload_batch_id")
         
         logger.info("✓ Database indexes created successfully")
     except Exception as e:

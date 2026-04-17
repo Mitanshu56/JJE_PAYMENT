@@ -20,6 +20,7 @@ async def get_bills(
     limit: int = Query(100, ge=1, le=1000),
     status: Optional[str] = None,
     party: Optional[str] = None,
+    month: Optional[int] = Query(None, ge=1, le=12),
     db: AsyncIOMotorDatabase = Depends(get_db)
 ):
     """Get all bills with optional filters"""
@@ -31,6 +32,8 @@ async def get_bills(
             filters['status'] = status
         if party:
             filters['party_name'] = {'$regex': party, '$options': 'i'}
+        if month is not None:
+            filters['$expr'] = {'$eq': [{'$month': '$invoice_date'}, month]}
         
         bills = await controller.get_bills(filters, skip, limit)
         total = await controller.count_bills(filters)

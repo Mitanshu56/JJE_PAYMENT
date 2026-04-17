@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Menu, X } from 'lucide-react'
 
-export default function Header({ onUploadClick }) {
+export default function Header({ onUploadClick, onLogout, currentUser }) {
   const [menuOpen, setMenuOpen] = useState(false)
 
   return (
@@ -30,6 +30,13 @@ export default function Header({ onUploadClick }) {
           >
             Upload
           </button>
+          <span className="text-sm text-gray-500">{currentUser || 'User'}</span>
+          <button
+            onClick={onLogout}
+            className="border border-gray-300 hover:bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium transition"
+          >
+            Logout
+          </button>
         </nav>
 
         {/* Mobile Menu */}
@@ -54,6 +61,13 @@ export default function Header({ onUploadClick }) {
             className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition"
           >
             Upload
+          </button>
+          <div className="text-sm text-gray-500">{currentUser || 'User'}</div>
+          <button
+            onClick={onLogout}
+            className="w-full border border-gray-300 hover:bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium transition"
+          >
+            Logout
           </button>
         </div>
       )}

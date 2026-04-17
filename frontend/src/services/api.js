@@ -1,18 +1,52 @@
 import axios from 'axios'
 
 const API_BASE_URL = 'http://localhost:8000'
+const AUTH_TOKEN_KEY = 'jje_auth_token'
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
 })
 
+export const authStorage = {
+  getToken: () => localStorage.getItem(AUTH_TOKEN_KEY) || '',
+  setToken: (token) => {
+    if (token) localStorage.setItem(AUTH_TOKEN_KEY, token)
+  },
+  clearToken: () => localStorage.removeItem(AUTH_TOKEN_KEY),
+}
+
+api.interceptors.request.use((config) => {
+  const token = authStorage.getToken()
+  if (token) {
+    config.headers = config.headers || {}
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      authStorage.clearToken()
+    }
+    return Promise.reject(error)
+  },
+)
+
+export const authAPI = {
+  login: (username, password) => api.post('/api/auth/login', { username, password }),
+  me: () => api.get('/api/auth/me'),
+}
+
 // Bills API
 export const billsAPI = {
-  getAll: (skip = 0, limit = 100, status = null, party = null) => {
+  getAll: (skip = 0, limit = 100, status = null, party = null, month = null) => {
     const params = new URLSearchParams({ skip, limit })
     if (status) params.append('status', status)
     if (party) params.append('party', party)
+    if (month) params.append('month', month)
     return api.get(`/api/bills/?${params}`)
   },
   getById: (invoiceNo) => api.get(`/api/bills/${invoiceNo}`),
@@ -30,6 +64,7 @@ export const paymentsAPI = {
   getById: (paymentId) => api.get(`/api/payments/${paymentId}`),
   getByParty: (partyName) => api.get(`/api/payments/party/${partyName}`),
   createManual: (payload) => api.post('/api/payments/manual', payload),
+  updateManual: (paymentId, payload) => api.put(`/api/payments/manual/${paymentId}`, payload),
   delete: (paymentId) => api.delete(`/api/payments/${paymentId}`),
 }
 
