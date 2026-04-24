@@ -55,8 +55,9 @@ export default function SummaryCards({ summary }) {
   ]
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      {cards.map((card, idx) => {
+    <>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+        {cards.map((card, idx) => {
         const Icon = card.icon
         return (
           <div key={idx} className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition">
@@ -95,7 +96,8 @@ export default function SummaryCards({ summary }) {
             </div>
           </div>
         )
-      })}
-    </div>
+        })}
+      </div>
+    </>
   )
 }
