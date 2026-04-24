@@ -20,6 +20,7 @@ export default function StatementTab() {
   const [fiscalYear, setFiscalYear] = useState('')
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [deletingMonthKey, setDeletingMonthKey] = useState('')
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
 
@@ -94,6 +95,26 @@ export default function StatementTab() {
 
   const handleFiscalYearChange = (value) => {
     setFiscalYear(value)
+  }
+
+  const handleDeleteMonth = async (monthKey) => {
+    if (!monthKey) return
+
+    const confirmed = window.confirm(`Remove all statement rows for ${monthKey}? This cannot be undone.`)
+    if (!confirmed) return
+
+    try {
+      setDeletingMonthKey(monthKey)
+      setError(null)
+      setSuccess(null)
+      const res = await statementsAPI.deleteMonth(monthKey)
+      setSuccess(res?.data?.message || 'Statement month removed successfully')
+      await loadStatements(fiscalYear)
+    } catch (err) {
+      setError(err?.response?.data?.detail || 'Failed to remove statement month')
+    } finally {
+      setDeletingMonthKey('')
+    }
   }
 
   return (
@@ -205,25 +226,40 @@ export default function StatementTab() {
 
                 {months.map((month) => {
                   const isActive = month.month_key === activeMonth?.month_key
+                  const isDeletingThisMonth = deletingMonthKey === month.month_key
                   return (
-                    <button
+                    <div
                       key={month.month_key}
-                      type="button"
-                      onClick={() => setActiveMonthKey(month.month_key)}
-                      className={`min-w-[150px] rounded-lg border px-4 py-3 text-left transition ${
+                      className={`min-w-[150px] rounded-lg border px-4 py-3 transition relative ${
                         isActive
                           ? 'border-blue-600 bg-blue-50 text-blue-700 shadow-sm'
                           : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
                       }`}
                     >
-                      <div className="text-sm font-semibold">{month.month_label}</div>
-                      <div className="mt-1 text-xs opacity-80">
-                        {month.count} row{month.count === 1 ? '' : 's'}
-                      </div>
-                      <div className="mt-1 text-xs opacity-80">
-                        Rs. {formatMoney(month.total_deposit)}
-                      </div>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveMonthKey(month.month_key)}
+                        className="w-full text-left"
+                      >
+                        <div className="text-sm font-semibold">{month.month_label}</div>
+                        <div className="mt-1 text-xs opacity-80">
+                          {month.count} row{month.count === 1 ? '' : 's'}
+                        </div>
+                        <div className="mt-1 text-xs opacity-80">
+                          Rs. {formatMoney(month.total_deposit)}
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        title={`Remove ${month.month_label}`}
+                        onClick={() => handleDeleteMonth(month.month_key)}
+                        disabled={Boolean(deletingMonthKey)}
+                        className="absolute top-2 right-2 h-6 w-6 rounded-full border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {isDeletingThisMonth ? '...' : 'x'}
+                      </button>
+                    </div>
                   )
                 })}
               </div>

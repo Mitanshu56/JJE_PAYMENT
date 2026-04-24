@@ -22,6 +22,15 @@ def _normalize_payment_mode(mode: str | None) -> str:
     return value or 'UNKNOWN'
 
 
+def _month_key_from_invoice_date(value) -> str:
+    if not value:
+        return ''
+    try:
+        return value.strftime('%Y-%m')
+    except Exception:
+        return ''
+
+
 @router.post("/match-payments")
 async def match_payments(db: AsyncIOMotorDatabase = Depends(get_db)):
     """
@@ -100,6 +109,24 @@ async def get_dashboard_summary(
         total_billing = sum(b.get('grand_total', 0) for b in bills)
         total_paid = sum(b.get('paid_amount', 0) for b in bills)
         total_pending = sum(b.get('remaining_amount', 0) for b in bills)
+        total_gst = sum(float(b.get('cgst', 0) or 0) + float(b.get('sgst', 0) or 0) for b in bills)
+
+        gst_month_map = {}
+        for bill in bills:
+            month_key = _month_key_from_invoice_date(bill.get('invoice_date'))
+            if not month_key:
+                continue
+
+            gst_amount = float(bill.get('cgst', 0) or 0) + float(bill.get('sgst', 0) or 0)
+            gst_month_map[month_key] = float(gst_month_map.get(month_key, 0.0)) + gst_amount
+
+        gst_by_month = [
+            {
+                'month': month_key,
+                'gst_total': amount,
+            }
+            for month_key, amount in sorted(gst_month_map.items(), key=lambda item: item[0], reverse=True)
+        ]
         
         paid_invoices = len([b for b in bills if b.get('status') == 'PAID'])
         partial_invoices = len([b for b in bills if b.get('status') == 'PARTIAL'])
@@ -130,6 +157,7 @@ async def get_dashboard_summary(
             'status': 'success',
             'summary': {
                 'total_billing': total_billing,
+                'total_gst': total_gst,
                 'total_paid': total_paid,
                 'total_pending': total_pending,
                 'paid_percentage': (total_paid / total_billing * 100) if total_billing > 0 else 0,
@@ -141,6 +169,7 @@ async def get_dashboard_summary(
                 },
                 'payment_records': payment_count,
                 'received_by_mode': received_by_mode_list,
+                'gst_by_month': gst_by_month,
             }
         }
     except Exception as e:

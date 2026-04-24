@@ -52,6 +52,7 @@ async def auth_middleware(request: Request, call_next):
 
     public_paths = {
         "/api/auth/login",
+        "/api/auth/forgot-password",
         "/api/health",
     }
 

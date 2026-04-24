@@ -1061,3 +1061,122 @@ async def confirm_statement_neft_payment(
     except Exception as e:
         logger.error(f"✗ Error confirming NEFT payment: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete('/statements/{statement_entry_id}')
+async def delete_statement_entry(
+    statement_entry_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Delete one statement row by id. If NEFT was confirmed, rollback linked payment first."""
+    try:
+        try:
+            entry_id = ObjectId(str(statement_entry_id))
+        except Exception:
+            raise HTTPException(status_code=400, detail='Invalid statement entry id')
+
+        entry = await db['statement_entries'].find_one({'_id': entry_id})
+        if not entry:
+            raise HTTPException(status_code=404, detail='Statement entry not found')
+
+        payment_id = str(entry.get('confirmed_payment_id') or '').strip()
+        if payment_id:
+            payment_controller = PaymentController(db)
+            bill_controller = BillController(db)
+            payment = await payment_controller.get_payment(payment_id)
+            if payment:
+                allocations = payment.get('allocations') or []
+                if not allocations:
+                    allocations = [
+                        {
+                            'invoice_no': inv,
+                            'allocated_amount': 0.0,
+                        }
+                        for inv in (payment.get('matched_invoice_nos') or [])
+                    ]
+
+                await bill_controller.revert_payment_from_bills(
+                    payment_id=payment_id,
+                    allocations=allocations,
+                    party_name=payment.get('party_name'),
+                )
+                await payment_controller.delete_payment(payment_id)
+
+        delete_result = await db['statement_entries'].delete_one({'_id': entry_id})
+        if delete_result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail='Statement entry not found')
+
+        return {
+            'status': 'success',
+            'message': 'Statement entry removed successfully',
+            'deleted_id': statement_entry_id,
+            'payment_rollback_applied': bool(payment_id),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"✗ Error deleting statement entry: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete('/statements/month/{month_key}')
+async def delete_statement_month(
+    month_key: str,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Delete all statement rows for one month key (YYYY-MM)."""
+    try:
+        if not re.fullmatch(r'\d{4}-\d{2}', str(month_key or '').strip()):
+            raise HTTPException(status_code=400, detail='Invalid month key. Expected format: YYYY-MM')
+
+        entries = await db['statement_entries'].find({'month_key': month_key}).to_list(length=None)
+        if not entries:
+            raise HTTPException(status_code=404, detail='No statement rows found for selected month')
+
+        payment_controller = PaymentController(db)
+        bill_controller = BillController(db)
+
+        payment_ids = {
+            str(entry.get('confirmed_payment_id') or '').strip()
+            for entry in entries
+            if str(entry.get('confirmed_payment_id') or '').strip()
+        }
+
+        rolled_back_payments = 0
+        for payment_id in payment_ids:
+            payment = await payment_controller.get_payment(payment_id)
+            if not payment:
+                continue
+
+            allocations = payment.get('allocations') or []
+            if not allocations:
+                allocations = [
+                    {
+                        'invoice_no': inv,
+                        'allocated_amount': 0.0,
+                    }
+                    for inv in (payment.get('matched_invoice_nos') or [])
+                ]
+
+            await bill_controller.revert_payment_from_bills(
+                payment_id=payment_id,
+                allocations=allocations,
+                party_name=payment.get('party_name'),
+            )
+            await payment_controller.delete_payment(payment_id)
+            rolled_back_payments += 1
+
+        delete_result = await db['statement_entries'].delete_many({'month_key': month_key})
+
+        return {
+            'status': 'success',
+            'message': f'Statement month {month_key} removed successfully',
+            'month_key': month_key,
+            'rows_deleted': int(delete_result.deleted_count or 0),
+            'payments_rolled_back': rolled_back_payments,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"✗ Error deleting statement month {month_key}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

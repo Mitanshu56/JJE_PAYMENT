@@ -1,16 +1,21 @@
 """
 Configuration settings for the Payment Tracking System
 """
+from pathlib import Path
 from pydantic_settings import BaseSettings
 import logging
 from typing import Optional
+
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+ENV_FILE = BASE_DIR / '.env'
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
     
     # MongoDB
-    MONGODB_URL: str = "mongodb://localhost:27017"
+    MONGODB_URL: str = "mongodb://locanamelhost:27017"
     MONGODB_DB_NAME: str = "payment_tracking"
     
     # Application
@@ -34,9 +39,17 @@ class Settings(BaseSettings):
     AUTH_PASSWORD: str = "meeT@meet"
     AUTH_SECRET_KEY: str = "change-this-secret-in-production"
     AUTH_TOKEN_EXPIRE_HOURS: int = 24
+
+    # Forgot-password mail
+    RECOVERY_EMAIL: str = "mitanshusailor@gmail.com"
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
     
     class Config:
-        env_file = ".env"
+        env_file = str(ENV_FILE)
         case_sensitive = True
 
 

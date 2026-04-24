@@ -11,6 +11,7 @@ function App() {
   const [authReady, setAuthReady] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState('')
+  const [activeTab, setActiveTab] = useState('summary')
 
   useEffect(() => {
     const verifyAuth = async () => {
@@ -56,6 +57,11 @@ function App() {
     dashboardRef.current?.reload?.()
   }
 
+  const handleHeaderNavigate = (tab) => {
+    setActiveTab(tab)
+    dashboardRef.current?.setActiveTab?.(tab)
+  }
+
   const handleLoginSuccess = (username) => {
     setIsAuthenticated(true)
     setCurrentUser(username || '')
@@ -81,10 +87,16 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header onUploadClick={handleUploadClick} onLogout={handleLogout} currentUser={currentUser} />
+      <Header
+        onUploadClick={handleUploadClick}
+        onLogout={handleLogout}
+        onNavigate={handleHeaderNavigate}
+        currentUser={currentUser}
+        activeTab={activeTab}
+      />
 
       <main className="max-w-7xl mx-auto p-4 md:p-6">
-        <Dashboard ref={dashboardRef} />
+        <Dashboard ref={dashboardRef} onActiveTabChange={setActiveTab} />
       </main>
 
       {/* Upload Modal */}

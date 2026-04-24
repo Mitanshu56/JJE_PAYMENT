@@ -1,7 +1,10 @@
 # Backend
 backend/venv/
+backend/.venv*/
 backend/__pycache__/
 backend/*.pyc
+backend/**/*.pyc
+backend/**/__pycache__/
 backend/.env
 backend/.pytest_cache/
 backend/uploads/
@@ -33,6 +36,9 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Local data
+mongo-data/
 
 # Environment
 .env

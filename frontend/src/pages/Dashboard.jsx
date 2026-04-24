@@ -9,7 +9,7 @@ import StatementMatchTab from '../components/statements/StatementMatchTab'
 import Charts from '../components/charts/Charts'
 import '../components/dashboard/Dashboard.css'
 
-const Dashboard = forwardRef(function Dashboard(_, ref) {
+const Dashboard = forwardRef(function Dashboard({ onActiveTabChange }, ref) {
   const [summary, setSummary] = useState(null)
   const [partySummary, setPartySummary] = useState(null)
   const [monthlySummary, setMonthlySummary] = useState(null)
@@ -23,10 +23,17 @@ const Dashboard = forwardRef(function Dashboard(_, ref) {
     loadDashboardData()
   }, [])
 
+  useEffect(() => {
+    onActiveTabChange?.(activeTab)
+  }, [activeTab, onActiveTabChange])
+
   useImperativeHandle(ref, () => ({
     reload: async () => {
       await loadDashboardData()
       setInvoicesRefreshToken((prev) => prev + 1)
+    },
+    setActiveTab: (tab) => {
+      if (tab) setActiveTab(tab)
     },
   }))
 
@@ -63,25 +70,13 @@ const Dashboard = forwardRef(function Dashboard(_, ref) {
       if (billsRes.status === 'fulfilled') {
         setAllBills(billsRes.value.data.bills || [])
       } else {
+        errors.push('bills')
         setAllBills([])
       }
 
       setError(errors.length ? `Failed to load: ${errors.join(', ')}` : null)
     } catch (err) {
       setError('Failed to load dashboard data')
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleMatchPayments = async () => {
-    try {
-      setLoading(true)
-      await dashboardAPI.matchPayments()
-      await loadDashboardData()
-    } catch (err) {
-      setError('Failed to match payments')
       console.error(err)
     } finally {
       setLoading(false)
@@ -105,13 +100,6 @@ const Dashboard = forwardRef(function Dashboard(_, ref) {
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900">Payment Dashboard</h1>
-          <button
-            onClick={handleMatchPayments}
-            disabled={loading}
-            className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-6 py-2 rounded-lg font-medium transition"
-          >
-            {loading ? 'Processing...' : 'Match Payments'}
-          </button>
         </div>
 
         {error && (

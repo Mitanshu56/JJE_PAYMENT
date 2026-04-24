@@ -38,6 +38,7 @@ api.interceptors.response.use(
 export const authAPI = {
   login: (username, password) => api.post('/api/auth/login', { username, password }),
   me: () => api.get('/api/auth/me'),
+  forgotPassword: (username) => api.post('/api/auth/forgot-password', { username }),
 }
 
 // Bills API
@@ -127,6 +128,7 @@ export const statementsAPI = {
     return api.get(`/api/upload/statements/match${query ? `?${query}` : ''}`)
   },
   confirmNeft: (payload) => api.post('/api/upload/statements/neft-confirm', payload),
+  deleteMonth: (monthKey) => api.delete(`/api/upload/statements/month/${monthKey}`),
 }
 
 // Dashboard API

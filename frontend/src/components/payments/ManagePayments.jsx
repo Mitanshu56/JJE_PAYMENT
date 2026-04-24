@@ -109,16 +109,17 @@ export default function ManagePayments({ bills, onPaymentSaved }) {
     setNotes('')
     setError(null)
 
-    setPartyPayments(await fetchPaymentsByParty(party.partyName))
+    try {
+      setPartyPayments(await fetchPaymentsByParty(party.partyName))
+    } catch (e) {
+      setPartyPayments([])
+      setError(e?.response?.data?.detail || 'Failed to load payment history for this party.')
+    }
   }
 
   const fetchPaymentsByParty = async (partyName) => {
-    try {
-      const res = await paymentsAPI.getByParty(partyName)
-      return Array.isArray(res?.data?.payments) ? res.data.payments : []
-    } catch (e) {
-      return []
-    }
+    const res = await paymentsAPI.getByParty(partyName)
+    return Array.isArray(res?.data?.payments) ? res.data.payments : []
   }
 
   const sortPaymentsByDateDesc = (payments) => {
@@ -134,7 +135,12 @@ export default function ManagePayments({ bills, onPaymentSaved }) {
 
     if (!partyName) return
 
-    const refreshedPayments = await fetchPaymentsByParty(partyName)
+    let refreshedPayments = []
+    try {
+      refreshedPayments = await fetchPaymentsByParty(partyName)
+    } catch (e) {
+      setError(e?.response?.data?.detail || 'Failed to refresh payment history for this party.')
+    }
     const sortedPayments = sortPaymentsByDateDesc(refreshedPayments)
 
     if (selectedParty?.partyName === partyName) {
