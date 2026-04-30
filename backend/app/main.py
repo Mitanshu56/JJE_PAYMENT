@@ -70,6 +70,18 @@ async def auth_middleware(request: Request, call_next):
         if auth_header.lower().startswith("bearer "):
             token = auth_header[7:].strip()
 
+        # Attach fiscal year to request state from header or default to current
+        try:
+            fy_header = request.headers.get("x-fiscal-year") or request.headers.get("X-Fiscal-Year")
+            if fy_header:
+                request.state.fiscal_year = fy_header
+            else:
+                from app.core.fiscal import current_fiscal_year_label
+
+                request.state.fiscal_year = current_fiscal_year_label()
+        except Exception:
+            request.state.fiscal_year = None
+
         claims = decode_token(token)
         if not claims:
             return JSONResponse(status_code=401, content={"detail": "Authentication required"})

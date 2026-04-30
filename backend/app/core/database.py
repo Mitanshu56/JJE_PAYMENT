@@ -88,6 +88,33 @@ async def create_indexes():
         await statements_col.create_index("value_date")
         await statements_col.create_index("upload_batch_id")
         
+        # Fiscal year master and FY-aware indexes
+        fiscal_col = db["fiscal_years"]
+        # seed current fiscal year if missing - do not block startup on failures
+        try:
+            from app.core.fiscal import current_fiscal_year_label
+
+            current_fy = current_fiscal_year_label()
+            await fiscal_col.update_one({"value": current_fy}, {"$setOnInsert": {"value": current_fy, "start_date": None, "end_date": None, "status": "active"}}, upsert=True)
+        except Exception:
+            pass
+
+        # Add FY-related indexes on main collections
+        try:
+            await bills_col.create_index([("fiscal_year", 1), ("invoice_key", 1)], unique=True, sparse=True)
+        except Exception:
+            # ignore if index exists or invalid
+            pass
+        try:
+            await payments_col.create_index([("fiscal_year", 1), ("payment_id", 1)], unique=True, sparse=True)
+        except Exception:
+            pass
+        try:
+            await bills_col.create_index([("fiscal_year", 1), ("party_name", 1)])
+            await payments_col.create_index([("fiscal_year", 1), ("party_name", 1)])
+        except Exception:
+            pass
+        
         logger.info("✓ Database indexes created successfully")
     except Exception as e:
         logger.error(f"✗ Failed to create indexes: {str(e)}")
