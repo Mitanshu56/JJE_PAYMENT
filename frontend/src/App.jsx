@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import Dashboard from './pages/Dashboard'
 import Login from './pages/Login'
+import ResetPassword from './pages/ResetPassword'
 import FileUpload from './components/FileUpload'
 import Header from './components/Header'
 import { authAPI, authStorage } from './services/api'
@@ -12,8 +13,23 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState('')
   const [activeTab, setActiveTab] = useState('summary')
+  const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get('reset_token') || '')
 
   useEffect(() => {
+    const handleLocationChange = () => {
+      setResetToken(new URLSearchParams(window.location.search).get('reset_token') || '')
+    }
+
+    window.addEventListener('popstate', handleLocationChange)
+    return () => window.removeEventListener('popstate', handleLocationChange)
+  }, [])
+
+  useEffect(() => {
+    if (resetToken) {
+      setAuthReady(true)
+      return
+    }
+
     const verifyAuth = async () => {
       const token = authStorage.getToken()
       if (!token) {
@@ -35,7 +51,7 @@ function App() {
     }
 
     verifyAuth()
-  }, [])
+  }, [resetToken])
 
   const handleUploadClick = () => {
     const uploadModal = document.getElementById('upload-modal')
@@ -73,12 +89,25 @@ function App() {
     setCurrentUser('')
   }
 
+  const handleResetComplete = () => {
+    authStorage.clearToken()
+    setResetToken('')
+    setIsAuthenticated(false)
+    setCurrentUser('')
+    setActiveTab('summary')
+    setAuthReady(true)
+  }
+
   if (!authReady) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center">
         <div className="text-slate-600 text-sm">Checking login session...</div>
       </div>
     )
+  }
+
+  if (resetToken) {
+    return <ResetPassword token={resetToken} onResetComplete={handleResetComplete} />
   }
 
   if (!isAuthenticated) {

@@ -16,11 +16,17 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     logger.info("🚀 Starting Payment Tracking Dashboard API...")
-    await connect_db()
+    try:
+        await connect_db()
+    except Exception as exc:
+        logger.error(f"Database startup failed. Continuing in degraded mode: {exc}")
     yield
     # Shutdown
     logger.info("🛑 Shutting down...")
-    await close_db()
+    try:
+        await close_db()
+    except Exception as exc:
+        logger.error(f"Database shutdown encountered an error: {exc}")
 
 
 # Create FastAPI app
@@ -53,6 +59,8 @@ async def auth_middleware(request: Request, call_next):
     public_paths = {
         "/api/auth/login",
         "/api/auth/forgot-password",
+        "/api/auth/reset-password",
+        "/api/auth/reset-password/validate",
         "/api/health",
     }
 

@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     API_TITLE: str = "Payment Tracking Dashboard API"
     API_VERSION: str = "1.0.0"
     API_DESCRIPTION: str = "API for tracking payments and invoices with smart matching"
+    FRONTEND_BASE_URL: str = "http://localhost:3000"
     
     # File uploads
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB
@@ -39,6 +40,7 @@ class Settings(BaseSettings):
     AUTH_PASSWORD: str = "meeT@meet"
     AUTH_SECRET_KEY: str = "change-this-secret-in-production"
     AUTH_TOKEN_EXPIRE_HOURS: int = 24
+    AUTH_RESET_TOKEN_EXPIRE_HOURS: int = 24
 
     # Forgot-password mail
     RECOVERY_EMAIL: str = "mitanshusailor@gmail.com"

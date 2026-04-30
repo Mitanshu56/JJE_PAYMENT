@@ -73,6 +73,15 @@ async def create_indexes():
         await logs_col.create_index("file_name")
         await logs_col.create_index([("file_type", 1), ("created_at", -1)])
 
+        # Authentication reset tokens
+        reset_tokens_col = db["password_reset_tokens"]
+        await reset_tokens_col.create_index("token_hash", unique=True)
+        await reset_tokens_col.create_index("expires_at", expireAfterSeconds=0)
+
+        # Authentication settings
+        auth_settings_col = db["auth_settings"]
+        await auth_settings_col.create_index("_id", unique=True)
+
         # Statement entries indexes
         statements_col = db["statement_entries"]
         await statements_col.create_index("month_key")

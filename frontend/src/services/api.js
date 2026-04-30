@@ -39,6 +39,8 @@ export const authAPI = {
   login: (username, password) => api.post('/api/auth/login', { username, password }),
   me: () => api.get('/api/auth/me'),
   forgotPassword: (username) => api.post('/api/auth/forgot-password', { username }),
+  validateResetToken: (token) => api.get(`/api/auth/reset-password/validate?token=${encodeURIComponent(token)}`),
+  resetPassword: (payload) => api.post('/api/auth/reset-password', payload),
 }
 
 // Bills API

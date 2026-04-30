@@ -24,18 +24,21 @@ def mask_email(value: str) -> str:
     return f"{masked_local}@{domain}"
 
 
-def send_forgot_password_email(*, username: str) -> None:
+def send_forgot_password_email(*, username: str, reset_link: str) -> None:
     """Send forgot-password assistance email to configured recovery inbox."""
-    if not settings.SMTP_USERNAME or not settings.SMTP_PASSWORD:
+    smtp_username = (settings.SMTP_USERNAME or "").strip()
+    smtp_password = (settings.SMTP_PASSWORD or "").replace(" ", "")
+
+    if not smtp_username or not smtp_password:
         raise RuntimeError("SMTP credentials are not configured")
 
     to_email = settings.RECOVERY_EMAIL
-    from_email = settings.SMTP_FROM_EMAIL or settings.SMTP_USERNAME
+    from_email = (settings.SMTP_FROM_EMAIL or smtp_username).strip()
 
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     msg = EmailMessage()
-    msg["Subject"] = "JJE Login - Password Reset Request"
+    msg["Subject"] = "JJE Login - Password Reset Link"
     msg["From"] = from_email
     msg["To"] = to_email
     msg.set_content(
@@ -46,7 +49,9 @@ def send_forgot_password_email(*, username: str) -> None:
                 f"User ID: {username}",
                 f"Requested At: {now_utc}",
                 "",
-                "If this was you, please contact admin or support to update the password safely.",
+                "Open the password reset page using the link below and set a new password.",
+                reset_link,
+                "",
                 "If this was not you, ignore this email.",
             ]
         )
@@ -55,7 +60,7 @@ def send_forgot_password_email(*, username: str) -> None:
     try:
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=20) as server:
             server.starttls()
-            server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+            server.login(smtp_username, smtp_password)
             server.send_message(msg)
     except Exception as exc:
         logger.error(f"Failed to send forgot-password email: {exc}")
