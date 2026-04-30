@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from app.core.config import settings, logger
 from app.core.auth import decode_token
 from app.core.database import connect_db, close_db
-from app.routes import auth_routes, upload_routes, bill_routes, payment_routes, dashboard_routes
+from app.routes import auth_routes, upload_routes, bill_routes, payment_routes, dashboard_routes, fiscal_routes
 
 
 @asynccontextmanager
@@ -61,6 +61,7 @@ async def auth_middleware(request: Request, call_next):
         "/api/auth/forgot-password",
         "/api/auth/reset-password",
         "/api/auth/reset-password/validate",
+        "/api/fiscal/years",
         "/api/health",
     }
 
@@ -96,6 +97,7 @@ app.include_router(upload_routes.router)
 app.include_router(bill_routes.router)
 app.include_router(payment_routes.router)
 app.include_router(dashboard_routes.router)
+app.include_router(fiscal_routes.router)
 
 
 @app.get("/")

@@ -22,6 +22,12 @@ api.interceptors.request.use((config) => {
     config.headers = config.headers || {}
     config.headers.Authorization = `Bearer ${token}`
   }
+  // Attach selected fiscal year if present
+  const selectedFY = localStorage.getItem('selected_fiscal_year')
+  if (selectedFY) {
+    config.headers = config.headers || {}
+    config.headers['X-Fiscal-Year'] = selectedFY
+  }
   return config
 })
 
@@ -41,6 +47,10 @@ export const authAPI = {
   forgotPassword: (username) => api.post('/api/auth/forgot-password', { username }),
   validateResetToken: (token) => api.get(`/api/auth/reset-password/validate?token=${encodeURIComponent(token)}`),
   resetPassword: (payload) => api.post('/api/auth/reset-password', payload),
+}
+
+export const fiscalAPI = {
+  listYears: () => api.get('/api/fiscal/years'),
 }
 
 // Bills API

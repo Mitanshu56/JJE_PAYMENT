@@ -1,8 +1,44 @@
 import React, { useState } from 'react'
 import { Menu, X } from 'lucide-react'
+import { fiscalAPI } from '../services/api'
+import { useEffect } from 'react'
 
 export default function Header({ onUploadClick, onLogout, onNavigate, currentUser, activeTab = 'summary' }) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [fiscalYears, setFiscalYears] = useState([])
+  const [selectedFY, setSelectedFY] = useState(() => localStorage.getItem('selected_fiscal_year') || '')
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fiscalAPI.listYears()
+        const list = (res?.data?.data || []).map((d) => d.value)
+        setFiscalYears(list)
+        if (!selectedFY && list.length) {
+          setSelectedFY(list[0])
+          localStorage.setItem('selected_fiscal_year', list[0])
+        }
+        // if backend returns no FYs, default to client-side current FY
+        if (!selectedFY && !list.length) {
+          const now = new Date();
+          const y = now.getFullYear();
+          const m = now.getMonth() + 1;
+          const fy = m >= 4 ? `FY-${y}-${y+1}` : `FY-${y-1}-${y}`
+          setSelectedFY(fy)
+          localStorage.setItem('selected_fiscal_year', fy)
+        }
+      } catch (err) {
+        // ignore
+      }
+    }
+    load()
+  }, [])
+
+  const handleFYChange = (e) => {
+    const v = e.target.value
+    setSelectedFY(v)
+    localStorage.setItem('selected_fiscal_year', v)
+  }
 
   const navClass = (tab, mobile = false) => {
     const base = mobile
@@ -40,6 +76,11 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
         </div>
 
         <nav className="hidden md:flex items-center gap-6">
+          <select value={selectedFY} onChange={handleFYChange} className="border border-gray-300 rounded-md px-2 py-1 text-sm">
+            {fiscalYears.map((fy) => (
+              <option key={fy} value={fy}>{fy}</option>
+            ))}
+          </select>
           <button type="button" onClick={() => handleNavigate('summary')} className={navClass('summary')}>
             Dashboard
           </button>
@@ -72,6 +113,11 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
 
       {menuOpen && (
         <div className="md:hidden border-t border-gray-200 p-4 space-y-3">
+            <select value={selectedFY} onChange={handleFYChange} className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
+              {fiscalYears.map((fy) => (
+                <option key={fy} value={fy}>{fy}</option>
+              ))}
+            </select>
           <button type="button" onClick={() => handleNavigate('summary')} className={navClass('summary', true)}>
             Dashboard
           </button>
