@@ -110,22 +110,35 @@ class BillController:
         logger.info(f"✓ Consolidated {len(to_delete)} duplicate invoice_key records: {invoice_key}")
         return primary
 
-    async def create_bill(self, bill_data: dict) -> dict:
-        """Create a new bill"""
+    async def create_bill(self, bill_data: dict, fiscal_year: Optional[str] = None) -> dict:
+        """Create a new bill and tag with fiscal year if provided or derivable."""
         try:
+            # Attach timestamps
             bill_data['created_at'] = datetime.utcnow()
             bill_data['updated_at'] = datetime.utcnow()
-            
+
+            # Determine fiscal year: explicit param takes precedence, then invoice_date if present
+            if fiscal_year:
+                bill_data['fiscal_year'] = fiscal_year
+            else:
+                invoice_date = bill_data.get('invoice_date')
+                if invoice_date:
+                    try:
+                        from app.core.fiscal import fiscal_year_label_from_date
+                        bill_data['fiscal_year'] = fiscal_year_label_from_date(invoice_date)
+                    except Exception:
+                        pass
+
             result = await self.collection.insert_one(bill_data)
             bill_data['_id'] = result.inserted_id
-            
+
             logger.info(f"✓ Created bill: {bill_data.get('invoice_no')}")
             return bill_data
         except Exception as e:
             logger.error(f"✗ Error creating bill: {str(e)}")
             raise
-    
-    async def create_bills_bulk(self, bills_data: List[dict], upload_batch_id: Optional[str] = None) -> dict:
+
+    async def create_bills_bulk(self, bills_data: List[dict], upload_batch_id: Optional[str] = None, fiscal_year: Optional[str] = None) -> dict:
         """Create or update multiple bills and return import statistics."""
         try:
             stats = {
@@ -150,6 +163,17 @@ class BillController:
                 party_name_norm = self._normalize_text(bill.get('party_name') or 'Unknown Party')
                 site_norm = self._normalize_text(bill.get('site'))
 
+                # Determine fiscal year for this bill: explicit param wins, else derive from invoice_date if present
+                bill_fiscal = fiscal_year
+                if not bill_fiscal:
+                    invoice_date_val = bill.get('invoice_date')
+                    if invoice_date_val:
+                        try:
+                            from app.core.fiscal import fiscal_year_label_from_date
+                            bill_fiscal = fiscal_year_label_from_date(invoice_date_val)
+                        except Exception:
+                            bill_fiscal = None
+
                 set_doc = {
                     'invoice_key': invoice_key,
                     'invoice_no': invoice_no,
@@ -169,13 +193,25 @@ class BillController:
                     'updated_at': now,
                 }
 
-                set_on_insert_doc = {
-                    'created_at': now,
-                    'status': BillStatus.UNPAID,
-                    'paid_amount': 0.0,
-                    'remaining_amount': grand_total,
-                    'matched_payment_ids': [],
-                }
+                # Attach fiscal year to both set and setOnInsert where available
+                if bill_fiscal:
+                    set_doc['fiscal_year'] = bill_fiscal
+                    set_on_insert_doc = {
+                        'created_at': now,
+                        'status': BillStatus.UNPAID,
+                        'paid_amount': 0.0,
+                        'remaining_amount': grand_total,
+                        'matched_payment_ids': [],
+                        'fiscal_year': bill_fiscal,
+                    }
+                else:
+                    set_on_insert_doc = {
+                        'created_at': now,
+                        'status': BillStatus.UNPAID,
+                        'paid_amount': 0.0,
+                        'remaining_amount': grand_total,
+                        'matched_payment_ids': [],
+                    }
 
                 # Primary path: fast upsert by stable identity key.
                 upserted_id = None
@@ -390,8 +426,11 @@ class BillController:
         bill_ids: Optional[List[str]] = None,
         invoice_nos: Optional[List[str]] = None,
         payment_id: Optional[str] = None,
+        fiscal_year: Optional[str] = None,
     ) -> dict:
-        """Allocate a payment amount across selected bills and update bill status/amounts."""
+        """Allocate a payment amount across selected bills and update bill status/amounts.
+        Adds an optional `fiscal_year` filter so allocations occur only within that fiscal.
+        """
         remaining_amount = float(amount or 0.0)
         if remaining_amount <= 0:
             return {
@@ -401,6 +440,10 @@ class BillController:
             }
 
         query = {'party_name': party_name}
+        # Enforce fiscal filter when provided
+        if fiscal_year:
+            query['fiscal_year'] = fiscal_year
+
         or_filters = []
 
         if bill_ids:
@@ -485,8 +528,11 @@ class BillController:
         payment_id: str,
         allocations: List[dict],
         party_name: Optional[str] = None,
+        fiscal_year: Optional[str] = None,
     ) -> dict:
-        """Revert bill amounts previously allocated by a payment."""
+        """Revert bill amounts previously allocated by a payment.
+        Optionally restricts the search to a fiscal_year when provided.
+        """
         reverted_total = 0.0
         reverted_allocations = []
 
@@ -509,6 +555,8 @@ class BillController:
                 invoice_query = {'invoice_no': invoice_no}
                 if party_name:
                     invoice_query['party_name'] = party_name
+                if fiscal_year:
+                    invoice_query['fiscal_year'] = fiscal_year
                 bill = await self.collection.find_one(invoice_query)
 
             if not bill:

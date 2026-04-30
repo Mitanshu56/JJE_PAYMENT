@@ -1,7 +1,7 @@
 """
 File upload API routes
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import tempfile
@@ -301,7 +301,11 @@ class StatementNeftConfirmRequest(BaseModel):
 
 
 @router.post("/invoices")
-async def upload_invoices(file: UploadFile = File(...), db: AsyncIOMotorDatabase = Depends(get_db)):
+async def upload_invoices(
+    file: UploadFile = File(...),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    request: Request = None,
+):
     """
     Upload invoice Excel file for extraction and storage.
     
@@ -311,6 +315,9 @@ async def upload_invoices(file: UploadFile = File(...), db: AsyncIOMotorDatabase
         if not file.filename.lower().endswith(('.xlsx', '.xls')):
             raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) allowed")
         
+        # Determine fiscal year from request state (middleware)
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+
         # Save temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as temp_file:
             contents = await file.read()
@@ -319,7 +326,7 @@ async def upload_invoices(file: UploadFile = File(...), db: AsyncIOMotorDatabase
         
         try:
             previous_upload = await db['upload_logs'].find_one(
-                {'file_type': 'invoice'},
+                {'file_type': 'invoice', **({'fiscal_year': fiscal} if fiscal else {})},
                 sort=[('created_at', -1)]
             )
 
@@ -348,9 +355,10 @@ async def upload_invoices(file: UploadFile = File(...), db: AsyncIOMotorDatabase
                 except Exception:
                     return 0.0
 
-            # Build snapshot to report accurate log stats for refreshed uploads.
+            # Build snapshot to report accurate log stats for refreshed uploads (scoped to fiscal if present).
+            existing_filter = {'fiscal_year': fiscal} if fiscal else {}
             existing_bills = await db['bills'].find(
-                {},
+                existing_filter,
                 {
                     'invoice_key': 1,
                     'invoice_date': 1,
@@ -398,10 +406,10 @@ async def upload_invoices(file: UploadFile = File(...), db: AsyncIOMotorDatabase
                     log_updated_records += 1
 
             # Always treat invoice upload as the latest source of truth.
-            # Clear prior bills and stale payment-to-invoice links before re-import.
-            await db['bills'].delete_many({})
+            # Clear prior bills and stale payment-to-invoice links before re-import (scoped to fiscal).
+            await db['bills'].delete_many({'fiscal_year': fiscal} if fiscal else {})
             await db['payments'].update_many(
-                {},
+                ({'fiscal_year': fiscal} if fiscal else {}),
                 {
                     '$set': {
                         'matched_invoice_nos': [],
@@ -409,15 +417,15 @@ async def upload_invoices(file: UploadFile = File(...), db: AsyncIOMotorDatabase
                 }
             )
             
-            # Store in database
-            import_stats = await bill_controller.create_bills_bulk(invoices, upload_batch_id=upload_batch_id)
+            # Store in database (pass fiscal through)
+            import_stats = await bill_controller.create_bills_bulk(invoices, upload_batch_id=upload_batch_id, fiscal_year=fiscal)
 
-            # Rebuild bill totals/status from existing payments and saved allocations.
+            # Rebuild bill totals/status from existing payments and saved allocations (scoped to fiscal).
             rematched_bills = 0
-            reconcile_summary = await reconcile_bills_from_payments(db)
+            reconcile_summary = await reconcile_bills_from_payments(db, fiscal_year=fiscal)
             rematched_bills = int(reconcile_summary.get('allocation_rows_applied') or 0)
 
-            total_bills_after_upload = await db['bills'].count_documents({})
+            total_bills_after_upload = await db['bills'].count_documents({'fiscal_year': fiscal} if fiscal else {})
             upload_time = datetime.now(timezone.utc)
             
             # Log upload with accurate statistics
@@ -477,13 +485,19 @@ async def upload_invoices(file: UploadFile = File(...), db: AsyncIOMotorDatabase
 
 
 @router.post("/bank-statements")
-async def upload_bank_statement(file: UploadFile = File(...), db: AsyncIOMotorDatabase = Depends(get_db)):
+async def upload_bank_statement(
+    file: UploadFile = File(...),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    request: Request = None,
+):
     """
     Upload bank statement Excel file for payment extraction and storage.
     """
     try:
         if not file.filename.lower().endswith(('.xlsx', '.xls')):
             raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) allowed")
+
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
         
         # Save temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as temp_file:
@@ -499,15 +513,16 @@ async def upload_bank_statement(file: UploadFile = File(...), db: AsyncIOMotorDa
             if not payments:
                 raise HTTPException(status_code=400, detail="No valid payments found in file")
             
-            # Store in database
+            # Store in database (pass fiscal through)
             payment_controller = PaymentController(db)
-            inserted_count = await payment_controller.create_payments_bulk(payments)
+            inserted_count = await payment_controller.create_payments_bulk(payments, fiscal_year=fiscal)
             
             # Log upload
             await db['upload_logs'].insert_one({
                 'file_name': file.filename,
                 'file_type': 'bank_statement',
                 'records_count': inserted_count,
+                'fiscal_year': fiscal,
                 'created_at': datetime.utcnow()
             })
             
@@ -534,10 +549,12 @@ async def upload_bank_statement(file: UploadFile = File(...), db: AsyncIOMotorDa
 
 
 @router.get("/history")
-async def get_upload_history(limit: int = 50, db: AsyncIOMotorDatabase = Depends(get_db)):
-    """Get history of uploaded files"""
+async def get_upload_history(limit: int = 50, db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
+    """Get history of uploaded files (scoped to fiscal if selected)"""
     try:
-        logs = await db['upload_logs'].find()\
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+        query = {'fiscal_year': fiscal} if fiscal else {}
+        logs = await db['upload_logs'].find(query)\
             .sort('created_at', -1)\
             .limit(limit)\
             .to_list(length=limit)
@@ -557,11 +574,12 @@ async def get_upload_history(limit: int = 50, db: AsyncIOMotorDatabase = Depends
 
 
 @router.get("/invoices/last")
-async def get_last_invoice_upload(db: AsyncIOMotorDatabase = Depends(get_db)):
+async def get_last_invoice_upload(db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
     """Get last invoice upload timestamp and summary stats."""
     try:
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
         last_log = await db['upload_logs'].find_one(
-            {'file_type': 'invoice'},
+            {'file_type': 'invoice', **({'fiscal_year': fiscal} if fiscal else {})},
             sort=[('created_at', -1)]
         )
 

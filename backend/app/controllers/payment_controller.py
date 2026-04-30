@@ -16,28 +16,50 @@ class PaymentController:
         self.db = db
         self.collection = db['payments']
     
-    async def create_payment(self, payment_data: dict) -> dict:
-        """Create a new payment"""
+    async def create_payment(self, payment_data: dict, fiscal_year: Optional[str] = None) -> dict:
+        """Create a new payment and tag with fiscal year if provided or derivable."""
         try:
             payment_data['created_at'] = datetime.utcnow()
             payment_data['updated_at'] = datetime.utcnow()
-            
+
+            # Attach fiscal year if provided, else try to derive from payment_date
+            if fiscal_year:
+                payment_data['fiscal_year'] = fiscal_year
+            else:
+                pd = payment_data.get('payment_date')
+                if pd:
+                    try:
+                        from app.core.fiscal import fiscal_year_label_from_date
+                        payment_data['fiscal_year'] = fiscal_year_label_from_date(pd)
+                    except Exception:
+                        pass
+
             result = await self.collection.insert_one(payment_data)
             payment_data['_id'] = result.inserted_id
-            
+
             logger.info(f"✓ Created payment: {payment_data.get('payment_id')}")
             return payment_data
         except Exception as e:
             logger.error(f"✗ Error creating payment: {str(e)}")
             raise
-    
-    async def create_payments_bulk(self, payments_data: List[dict]) -> int:
-        """Create multiple payments"""
+
+    async def create_payments_bulk(self, payments_data: List[dict], fiscal_year: Optional[str] = None) -> int:
+        """Create multiple payments and tag with fiscal year when provided."""
         try:
             for payment in payments_data:
                 payment['created_at'] = datetime.utcnow()
                 payment['updated_at'] = datetime.utcnow()
-            
+                if fiscal_year:
+                    payment['fiscal_year'] = fiscal_year
+                else:
+                    pd = payment.get('payment_date')
+                    if pd:
+                        try:
+                            from app.core.fiscal import fiscal_year_label_from_date
+                            payment['fiscal_year'] = fiscal_year_label_from_date(pd)
+                        except Exception:
+                            pass
+
             result = await self.collection.insert_many(payments_data)
             logger.info(f"✓ Created {len(result.inserted_ids)} payments")
             return len(result.inserted_ids)
@@ -45,25 +67,34 @@ class PaymentController:
             logger.error(f"✗ Error creating payments: {str(e)}")
             raise
     
-    async def get_payment(self, payment_id: str) -> Optional[dict]:
-        """Get a payment by ID"""
-        return await self.collection.find_one({'payment_id': payment_id})
+    async def get_payment(self, payment_id: str, fiscal_year: Optional[str] = None) -> Optional[dict]:
+        """Get a payment by ID, optionally constrained to fiscal_year."""
+        query = {'payment_id': payment_id}
+        if fiscal_year:
+            query['fiscal_year'] = fiscal_year
+        return await self.collection.find_one(query)
     
-    async def get_payments(self, filters: dict = None, skip: int = 0, limit: int = 100) -> List[dict]:
-        """Get payments with optional filters"""
+    async def get_payments(self, filters: dict = None, skip: int = 0, limit: int = 100, fiscal_year: Optional[str] = None) -> List[dict]:
+        """Get payments with optional filters and optional fiscal_year constraint"""
         query = filters or {}
+        if fiscal_year:
+            query['fiscal_year'] = fiscal_year
         cursor = self.collection.find(query).skip(skip).limit(limit)
         return await cursor.to_list(length=limit)
     
-    async def get_payments_by_party(self, party_name: str) -> List[dict]:
-        """Get all payments for a party"""
-        return await self.collection.find({'party_name': party_name}).to_list(length=None)
+    async def get_payments_by_party(self, party_name: str, fiscal_year: Optional[str] = None) -> List[dict]:
+        """Get all payments for a party, optionally scoped to fiscal_year"""
+        query = {'party_name': party_name}
+        if fiscal_year:
+            query['fiscal_year'] = fiscal_year
+        return await self.collection.find(query).to_list(length=None)
     
-    async def get_unmatched_payments(self) -> List[dict]:
-        """Get payments that are not yet matched to invoices"""
-        return await self.collection.find({
-            'matched_invoice_nos': {'$eq': [] }
-        }).to_list(length=None)
+    async def get_unmatched_payments(self, fiscal_year: Optional[str] = None) -> List[dict]:
+        """Get payments that are not yet matched to invoices, optionally scoped to fiscal_year"""
+        query = {'matched_invoice_nos': {'$eq': []}}
+        if fiscal_year:
+            query['fiscal_year'] = fiscal_year
+        return await self.collection.find(query).to_list(length=None)
     
     async def update_payment_matches(
         self,
@@ -95,7 +126,9 @@ class PaymentController:
             logger.error(f"✗ Error deleting payment: {str(e)}")
             return False
     
-    async def count_payments(self, filters: dict = None) -> int:
-        """Count payments matching filters"""
+    async def count_payments(self, filters: dict = None, fiscal_year: Optional[str] = None) -> int:
+        """Count payments matching filters, with optional fiscal_year"""
         query = filters or {}
+        if fiscal_year:
+            query['fiscal_year'] = fiscal_year
         return await self.collection.count_documents(query)

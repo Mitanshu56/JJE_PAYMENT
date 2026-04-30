@@ -1,7 +1,7 @@
 """
 Payment management API routes
 """
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from typing import Optional, List
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from datetime import datetime
@@ -16,13 +16,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/payments", tags=["Payments"])
 
 
-async def reconcile_bills_from_payments(db: AsyncIOMotorDatabase) -> dict:
-    """Rebuild bill paid/remaining/status from current payments collection."""
+async def reconcile_bills_from_payments(db: AsyncIOMotorDatabase, fiscal_year: Optional[str] = None) -> dict:
+    """Rebuild bill paid/remaining/status from current payments collection.
+    If `fiscal_year` is provided, operations are constrained to that fiscal only.
+    """
     bill_controller = BillController(db)
     payment_controller = PaymentController(db)
 
-    # Reset all bills to unpaid baseline.
-    all_bills = await bill_controller.get_bills(limit=100000)
+    # Reset bills in scope to unpaid baseline.
+    bill_filter = {'fiscal_year': fiscal_year} if fiscal_year else {}
+    all_bills = await bill_controller.get_bills(filters=bill_filter, limit=100000, fiscal_year=fiscal_year)
     for bill in all_bills:
         grand_total = float(bill.get('grand_total') or 0.0)
         await db['bills'].update_one(
@@ -38,7 +41,7 @@ async def reconcile_bills_from_payments(db: AsyncIOMotorDatabase) -> dict:
             },
         )
 
-    payments = await payment_controller.get_payments(limit=100000)
+    payments = await payment_controller.get_payments(limit=100000, fiscal_year=fiscal_year)
     payments = sorted(
         payments,
         key=lambda p: (
@@ -71,6 +74,7 @@ async def reconcile_bills_from_payments(db: AsyncIOMotorDatabase) -> dict:
             bill_ids=bill_ids,
             invoice_nos=invoice_nos,
             payment_id=payment_id,
+            fiscal_year=fiscal_year,
         )
 
         applied_rows += len(allocation.get('allocations') or [])
@@ -135,9 +139,10 @@ class EditManualPaymentRequest(BaseModel):
 
 
 @router.post("/manual")
-async def create_manual_payment(payload: ManualPaymentRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
-    """Create a manual payment and allocate it across selected bills."""
+async def create_manual_payment(payload: ManualPaymentRequest, db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
+    """Create a manual payment and allocate it across selected bills (scoped to fiscal)."""
     try:
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
         payment_controller = PaymentController(db)
         bill_controller = BillController(db)
 
@@ -171,6 +176,7 @@ async def create_manual_payment(payload: ManualPaymentRequest, db: AsyncIOMotorD
             bill_ids=payload.bill_ids,
             invoice_nos=payload.invoice_nos,
             payment_id=payment_id,
+            fiscal_year=fiscal,
         )
 
         payment_doc = {
@@ -194,7 +200,7 @@ async def create_manual_payment(payload: ManualPaymentRequest, db: AsyncIOMotorD
             'unapplied_amount': allocation['remaining_amount'],
         }
 
-        created_payment = await payment_controller.create_payment(payment_doc)
+        created_payment = await payment_controller.create_payment(payment_doc, fiscal_year=fiscal)
 
         if '_id' in created_payment:
             created_payment['_id'] = str(created_payment['_id'])
@@ -216,13 +222,15 @@ async def edit_manual_payment(
     payment_id: str,
     payload: EditManualPaymentRequest,
     db: AsyncIOMotorDatabase = Depends(get_db),
+    request: Request = None,
 ):
     """Edit an existing manual payment and re-allocate it across selected bills."""
     try:
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
         payment_controller = PaymentController(db)
         bill_controller = BillController(db)
 
-        existing_payment = await payment_controller.get_payment(payment_id)
+        existing_payment = await payment_controller.get_payment(payment_id, fiscal_year=fiscal)
         if not existing_payment:
             raise HTTPException(status_code=404, detail="Payment not found")
 
@@ -271,6 +279,7 @@ async def edit_manual_payment(
             payment_id=payment_id,
             allocations=old_allocations,
             party_name=party_name,
+            fiscal_year=fiscal,
         )
 
         allocation = await bill_controller.apply_payment_to_bills(
@@ -279,6 +288,7 @@ async def edit_manual_payment(
             bill_ids=payload.bill_ids,
             invoice_nos=payload.invoice_nos,
             payment_id=payment_id,
+            fiscal_year=fiscal,
         )
 
         if not allocation['allocations']:
@@ -318,7 +328,7 @@ async def edit_manual_payment(
         }
 
         await db['payments'].update_one({'payment_id': payment_id}, {'$set': update_doc})
-        updated_payment = await payment_controller.get_payment(payment_id)
+        updated_payment = await payment_controller.get_payment(payment_id, fiscal_year=fiscal)
 
         if '_id' in updated_payment:
             updated_payment['_id'] = str(updated_payment['_id'])
@@ -345,18 +355,20 @@ async def get_payments(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     party: Optional[str] = None,
-    db: AsyncIOMotorDatabase = Depends(get_db)
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    request: Request = None,
 ):
-    """Get all payments with optional filters"""
+    """Get all payments with optional filters (scoped to fiscal if selected)"""
     try:
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
         controller = PaymentController(db)
         filters = {}
         
         if party:
             filters['party_name'] = {'$regex': party, '$options': 'i'}
         
-        payments = await controller.get_payments(filters, skip, limit)
-        total = await controller.count_payments(filters)
+        payments = await controller.get_payments(filters, skip, limit, fiscal_year=fiscal)
+        total = await controller.count_payments(filters, fiscal_year=fiscal)
         
         # Convert ObjectId to string
         for payment in payments:
@@ -380,11 +392,12 @@ async def get_payments(
 
 
 @router.get("/{payment_id}")
-async def get_payment(payment_id: str, db: AsyncIOMotorDatabase = Depends(get_db)):
-    """Get a specific payment by ID"""
+async def get_payment(payment_id: str, db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
+    """Get a specific payment by ID (scoped to fiscal if selected)"""
     try:
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
         controller = PaymentController(db)
-        payment = await controller.get_payment(payment_id)
+        payment = await controller.get_payment(payment_id, fiscal_year=fiscal)
         
         if not payment:
             raise HTTPException(status_code=404, detail="Payment not found")
@@ -407,11 +420,12 @@ async def get_payment(payment_id: str, db: AsyncIOMotorDatabase = Depends(get_db
 
 
 @router.get("/party/{party_name}")
-async def get_payments_by_party(party_name: str, db: AsyncIOMotorDatabase = Depends(get_db)):
-    """Get all payments for a specific party"""
+async def get_payments_by_party(party_name: str, db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
+    """Get all payments for a specific party (scoped to fiscal if selected)"""
     try:
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
         controller = PaymentController(db)
-        payments = await controller.get_payments_by_party(party_name)
+        payments = await controller.get_payments_by_party(party_name, fiscal_year=fiscal)
         
         # Convert ObjectId to string
         for payment in payments:
@@ -433,13 +447,14 @@ async def get_payments_by_party(party_name: str, db: AsyncIOMotorDatabase = Depe
 
 
 @router.delete("/{payment_id}")
-async def delete_payment(payment_id: str, db: AsyncIOMotorDatabase = Depends(get_db)):
-    """Delete a payment"""
+async def delete_payment(payment_id: str, db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
+    """Delete a payment (scoped to fiscal if selected)"""
     try:
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
         controller = PaymentController(db)
         bill_controller = BillController(db)
 
-        existing_payment = await controller.get_payment(payment_id)
+        existing_payment = await controller.get_payment(payment_id, fiscal_year=fiscal)
         if not existing_payment:
             raise HTTPException(status_code=404, detail="Payment not found")
 
@@ -461,6 +476,7 @@ async def delete_payment(payment_id: str, db: AsyncIOMotorDatabase = Depends(get
             payment_id=payment_id,
             allocations=allocations,
             party_name=existing_payment.get('party_name'),
+            fiscal_year=fiscal,
         )
 
         success = await controller.delete_payment(payment_id)
@@ -468,7 +484,7 @@ async def delete_payment(payment_id: str, db: AsyncIOMotorDatabase = Depends(get
         if not success:
             raise HTTPException(status_code=404, detail="Payment not found")
 
-        reconcile_result = await reconcile_bills_from_payments(db)
+        reconcile_result = await reconcile_bills_from_payments(db, fiscal_year=fiscal)
         
         return {
             'status': 'success',
