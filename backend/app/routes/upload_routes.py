@@ -109,12 +109,36 @@ def _fiscal_year_from_key(month_key: str) -> str | None:
         return None
 
     start_year = year if month >= 4 else year - 1
-    end_year = (start_year + 1) % 100
-    return f"{start_year}-{end_year:02d}"
+    end_year = start_year + 1
+    return f"FY-{start_year}-{end_year}"
+
+
+def _normalize_fiscal_year_value(value: str | None) -> str | None:
+    raw = str(value or '').strip().upper().replace(' ', '')
+    if not raw:
+        return None
+
+    raw = raw.replace('FYFY-', 'FY-')
+    if not raw.startswith('FY'):
+        raw = f'FY-{raw}'
+
+    numbers = re.findall(r'\d+', raw)
+    if len(numbers) >= 2:
+        start_year = int(numbers[0])
+        end_year_raw = int(numbers[1])
+        end_year = end_year_raw if end_year_raw >= 1000 else ((start_year // 100) * 100) + end_year_raw
+        return f'FY-{start_year}-{end_year}'
+
+    return raw.replace('FY', 'FY-').replace('FY--', 'FY-')
 
 
 def _fiscal_year_label(fiscal_year: str) -> str:
-    return f"FY {fiscal_year}"
+    normalized = _normalize_fiscal_year_value(fiscal_year) or str(fiscal_year or '').strip()
+    if normalized.startswith('FY-'):
+        return normalized.replace('FY-', 'FY ', 1)
+    if normalized.startswith('FY '):
+        return normalized
+    return f"FY {normalized}"
 
 
 def _group_statement_rows(rows):
@@ -127,10 +151,11 @@ def _group_statement_rows(rows):
             continue
 
         if key not in months:
+            row_fiscal_year = _normalize_fiscal_year_value(row.get('fiscal_year')) or _fiscal_year_from_key(key)
             months[key] = {
                 'month_key': key,
                 'month_label': label,
-                'fiscal_year': _fiscal_year_from_key(key),
+                'fiscal_year': row_fiscal_year,
                 'total_deposit': 0.0,
                 'count': 0,
                 'rows': [],
@@ -608,7 +633,7 @@ async def get_last_invoice_upload(db: AsyncIOMotorDatabase = Depends(get_db), re
 
 
 @router.post("/statements/pdf")
-async def upload_statement_pdf(file: UploadFile = File(...), db: AsyncIOMotorDatabase = Depends(get_db)):
+async def upload_statement_pdf(file: UploadFile = File(...), db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
     """Upload bank statement PDF and extract credited/deposit rows only."""
     try:
         if not file.filename.lower().endswith('.pdf'):
@@ -628,10 +653,12 @@ async def upload_statement_pdf(file: UploadFile = File(...), db: AsyncIOMotorDat
 
             upload_batch_id = datetime.utcnow().strftime('%Y%m%d%H%M%S%f')
             now = datetime.utcnow()
+            fiscal = _normalize_fiscal_year_value(getattr(request.state, 'fiscal_year', None) if request is not None else None)
             docs = []
             for row in rows:
                 docs.append({
                     'upload_batch_id': upload_batch_id,
+                    'fiscal_year': fiscal,
                     'source_file': file.filename,
                     'value_date': row['value_date'],
                     'value_date_display': row['value_date_display'],
@@ -651,6 +678,7 @@ async def upload_statement_pdf(file: UploadFile = File(...), db: AsyncIOMotorDat
                 'file_type': 'statement_pdf',
                 'records_count': inserted_count,
                 'upload_batch_id': upload_batch_id,
+                'fiscal_year': fiscal,
                 'created_at': now,
             })
 
@@ -698,6 +726,7 @@ async def get_statement_rows_monthly(
         rows = await db['statement_entries'].find().sort('value_date', -1).to_list(length=None)
 
         grouped = _group_statement_rows(rows)
+        selected_fiscal_year = _normalize_fiscal_year_value(fiscal_year)
 
         fiscal_years = []
         years = []
@@ -707,7 +736,7 @@ async def get_statement_rows_monthly(
         seen_months = set()
 
         for item in grouped:
-            fy = item.get('fiscal_year')
+            fy = _normalize_fiscal_year_value(item.get('fiscal_year') or _fiscal_year_from_key(item.get('month_key') or ''))
             if fy and fy not in seen_fy:
                 seen_fy.add(fy)
                 fiscal_years.append({
@@ -728,13 +757,16 @@ async def get_statement_rows_monthly(
                     'label': MONTH_LABELS.get(month_key, str(month_key)),
                 })
 
-        selected_fiscal_year = fiscal_year
         if selected_fiscal_year is None and year is None and month is None and fiscal_years:
             selected_fiscal_year = fiscal_years[0]['value']
         filtered = grouped
 
         if selected_fiscal_year:
-            filtered = [item for item in filtered if item.get('fiscal_year') == selected_fiscal_year]
+            filtered = [
+                item
+                for item in filtered
+                if _normalize_fiscal_year_value(item.get('fiscal_year') or _fiscal_year_from_key(item.get('month_key') or '')) == selected_fiscal_year
+            ]
 
         if year is not None:
             filtered = [item for item in filtered if _year_from_key(item['month_key']) == year]
@@ -788,10 +820,11 @@ async def get_statement_match(
     """Extract party names from statement narration and map them to invoice parties."""
     try:
         statement_rows = await db['statement_entries'].find({}).sort('value_date', -1).to_list(length=None)
-        if fiscal_year:
+        selected_fiscal_year = _normalize_fiscal_year_value(fiscal_year)
+        if selected_fiscal_year:
             statement_rows = [
                 row for row in statement_rows
-                if _fiscal_year_from_key(row.get('month_key') or '') == fiscal_year
+                if _normalize_fiscal_year_value(row.get('fiscal_year') or _fiscal_year_from_key(row.get('month_key') or '')) == selected_fiscal_year
             ]
 
         if neft_only:

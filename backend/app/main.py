@@ -61,11 +61,10 @@ async def auth_middleware(request: Request, call_next):
         "/api/auth/forgot-password",
         "/api/auth/reset-password",
         "/api/auth/reset-password/validate",
-        "/api/fiscal/years",
         "/api/health",
     }
 
-    if path.startswith("/api") and path not in public_paths:
+    if path.startswith("/api") and not (path == "/api/fiscal/years" and request.method == "GET") and path not in public_paths:
         auth_header = request.headers.get("authorization", "")
         token = ""
         if auth_header.lower().startswith("bearer "):
@@ -88,6 +87,7 @@ async def auth_middleware(request: Request, call_next):
             return JSONResponse(status_code=401, content={"detail": "Authentication required"})
 
         request.state.user = claims.get("sub")
+        request.state.role = claims.get("role", "user")
 
     return await call_next(request)
 

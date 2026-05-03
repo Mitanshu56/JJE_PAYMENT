@@ -9,22 +9,30 @@ function formatMoney(value) {
 }
 
 function getFiscalLabel(fiscalYear) {
-  return fiscalYear ? `FY ${fiscalYear}` : 'Financial year'
+  if (!fiscalYear) return 'Financial year'
+  const value = String(fiscalYear).trim()
+  if (value.toUpperCase().startsWith('FY-')) {
+    return value.replace(/^FY-/i, 'FY ').replace(/-/g, '-')
+  }
+  if (value.toUpperCase().startsWith('FY ')) {
+    return value
+  }
+  return `FY ${value}`
 }
+
+import { getSelectedFiscalYear } from '../../utils/fiscal'
 
 export default function StatementTab() {
   const [months, setMonths] = useState([])
   const [activeMonthKey, setActiveMonthKey] = useState('')
   const [totalRows, setTotalRows] = useState(0)
-  const [availableFilters, setAvailableFilters] = useState({ fiscal_years: [] })
-  const [fiscalYear, setFiscalYear] = useState('')
+  const [fiscalYear, setFiscalYear] = useState(() => getSelectedFiscalYear())
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [deletingMonthKey, setDeletingMonthKey] = useState('')
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
 
-  const fiscalYearOptions = useMemo(() => availableFilters.fiscal_years || [], [availableFilters.fiscal_years])
   const allRowsCount = useMemo(() => months.reduce((sum, month) => sum + Number(month.count || 0), 0), [months])
   const allTotalDeposit = useMemo(
     () => months.reduce((sum, month) => sum + Number(month.total_deposit || 0), 0),
@@ -50,9 +58,6 @@ export default function StatementTab() {
 
       setMonths(data.months || [])
       setTotalRows(data.total_rows || 0)
-      setAvailableFilters({
-        fiscal_years: data.available_filters?.fiscal_years || [],
-      })
 
       const resolvedFiscalYear = nextFiscalYear || data.filters?.fiscal_year || data.available_filters?.fiscal_years?.[0]?.value || ''
       if (resolvedFiscalYear && resolvedFiscalYear !== fiscalYear) {
@@ -73,6 +78,16 @@ export default function StatementTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fiscalYear])
 
+  useEffect(() => {
+    const handleFiscalYearChange = (event) => {
+      const nextFiscalYear = event?.detail || getSelectedFiscalYear()
+      setFiscalYear(nextFiscalYear)
+    }
+
+    window.addEventListener('selected-fiscal-year-changed', handleFiscalYearChange)
+    return () => window.removeEventListener('selected-fiscal-year-changed', handleFiscalYearChange)
+  }, [])
+
   const handlePdfUpload = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -91,10 +106,6 @@ export default function StatementTab() {
       setUploading(false)
       e.target.value = ''
     }
-  }
-
-  const handleFiscalYearChange = (value) => {
-    setFiscalYear(value)
   }
 
   const handleDeleteMonth = async (monthKey) => {
@@ -156,20 +167,9 @@ export default function StatementTab() {
           </span>
         </div>
 
-        <div className="mt-4 max-w-sm">
-          <label className="block text-xs font-medium text-gray-500 mb-1">Financial year</label>
-          <select
-            value={fiscalYear}
-            onChange={(e) => handleFiscalYearChange(e.target.value)}
-            className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm bg-white"
-          >
-            <option value="">Select financial year</option>
-            {fiscalYearOptions.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
+        <div className="mt-4 max-w-sm rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+          <div className="text-xs font-medium text-gray-500">Current financial year</div>
+          <div className="text-sm font-semibold text-gray-900 mt-1">{getFiscalLabel(fiscalYear)}</div>
         </div>
 
         {success && (
@@ -190,7 +190,7 @@ export default function StatementTab() {
           <div className="text-sm text-gray-600">Loading statement data...</div>
         ) : months.length === 0 ? (
           <div className="text-sm text-gray-500">
-            No statement rows found. Upload a PDF or choose another financial year.
+            No statement rows found for the current financial year.
           </div>
         ) : (
           <div className="space-y-5">

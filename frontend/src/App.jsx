@@ -12,7 +12,9 @@ function App() {
   const [authReady, setAuthReady] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState('')
+  const [currentRole, setCurrentRole] = useState('user')
   const [activeTab, setActiveTab] = useState('summary')
+  const [fiscalYearsVersion, setFiscalYearsVersion] = useState(0)
   const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get('reset_token') || '')
 
   useEffect(() => {
@@ -41,10 +43,12 @@ function App() {
         const res = await authAPI.me()
         setIsAuthenticated(true)
         setCurrentUser(res?.data?.username || '')
+        setCurrentRole(res?.data?.role || 'user')
       } catch {
         authStorage.clearToken()
         setIsAuthenticated(false)
         setCurrentUser('')
+        setCurrentRole('user')
       } finally {
         setAuthReady(true)
       }
@@ -78,15 +82,17 @@ function App() {
     dashboardRef.current?.setActiveTab?.(tab)
   }
 
-  const handleLoginSuccess = (username) => {
+  const handleLoginSuccess = (username, role = 'user') => {
     setIsAuthenticated(true)
     setCurrentUser(username || '')
+    setCurrentRole(role || 'user')
   }
 
   const handleLogout = () => {
     authStorage.clearToken()
     setIsAuthenticated(false)
     setCurrentUser('')
+    setCurrentRole('user')
   }
 
   const handleResetComplete = () => {
@@ -94,8 +100,13 @@ function App() {
     setResetToken('')
     setIsAuthenticated(false)
     setCurrentUser('')
+    setCurrentRole('user')
     setActiveTab('summary')
     setAuthReady(true)
+  }
+
+  const handleFiscalYearsChanged = () => {
+    setFiscalYearsVersion((value) => value + 1)
   }
 
   if (!authReady) {
@@ -111,7 +122,7 @@ function App() {
   }
 
   if (!isAuthenticated) {
-    return <Login onLoginSuccess={handleLoginSuccess} />
+    return <Login onLoginSuccess={handleLoginSuccess} refreshKey={fiscalYearsVersion} />
   }
 
   return (
@@ -122,10 +133,16 @@ function App() {
         onNavigate={handleHeaderNavigate}
         currentUser={currentUser}
         activeTab={activeTab}
+        refreshKey={fiscalYearsVersion}
       />
 
       <main className="max-w-7xl mx-auto p-4 md:p-6">
-        <Dashboard ref={dashboardRef} onActiveTabChange={setActiveTab} />
+        <Dashboard
+          ref={dashboardRef}
+          onActiveTabChange={setActiveTab}
+          currentRole={currentRole}
+          onFiscalYearsChanged={handleFiscalYearsChanged}
+        />
       </main>
 
       {/* Upload Modal */}

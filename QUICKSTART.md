@@ -2,6 +2,8 @@
 
 ## 🚀 Get Started in 5 Minutes
 
+## uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
 ### Prerequisites
 - Python 3.9+
 - Node.js 16+
@@ -34,6 +36,18 @@ npm run dev
 Dashboard: http://localhost:3000
 API Docs: http://localhost:8000/docs
 ```
+
+### Login Roles
+
+- **Admin**: `Mitanshu` / `meeT@123`
+- **Normal login**: the existing business login still works, and the selected fiscal year is stored in the browser and sent with every request.
+- After admin creates a new fiscal year, it appears in the fiscal-year dropdown on the login screen and in the dashboard header.
+
+### Admin FY Setup
+
+- Sign in as admin.
+- Open the dashboard and use the **Admin FY Setup** box to create the next fiscal year, such as `FY-2025-2026`.
+- Switch the FY dropdown to work inside that fiscal year's dashboard scope.
 
 ### macOS/Linux Users
 

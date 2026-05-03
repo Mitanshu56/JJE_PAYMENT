@@ -152,15 +152,25 @@ async def login(payload: LoginRequest, db: AsyncIOMotorDatabase = Depends(get_db
     auth_settings = await _get_auth_settings(db)
     expected_username = str(auth_settings.get("username") or settings.AUTH_USERNAME).strip()
     password_hash = str(auth_settings.get("password_hash") or "")
+    admin_username = str(settings.ADMIN_USERNAME or "").strip()
+    admin_password = str(settings.ADMIN_PASSWORD or "")
 
-    if payload.username.strip() != expected_username or not _verify_password(payload.password, password_hash):
+    username = payload.username.strip()
+    role = "user"
+
+    if username == admin_username and hmac.compare_digest(payload.password, admin_password):
+        role = "admin"
+    elif username == expected_username and _verify_password(payload.password, password_hash):
+        role = "user"
+    else:
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    token = create_token(payload.username)
+    token = create_token(username, role=role)
     return {
         "status": "success",
         "token": token,
-        "username": payload.username,
+        "username": username,
+        "role": role,
     }
 
 
@@ -177,6 +187,7 @@ async def me(authorization: str | None = Header(default=None)):
     return {
         "status": "success",
         "username": claims.get("sub"),
+        "role": claims.get("role", "user"),
         "expires_at": claims.get("exp"),
     }
 

@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     # Authentication
     AUTH_USERNAME: str = "JJE123"
     AUTH_PASSWORD: str = "meeT@meet"
+    ADMIN_USERNAME: str = "Mitanshu"
+    ADMIN_PASSWORD: str = "meeT@123"
     AUTH_SECRET_KEY: str = "change-this-secret-in-production"
     AUTH_TOKEN_EXPIRE_HOURS: int = 24
     AUTH_RESET_TOKEN_EXPIRE_HOURS: int = 24

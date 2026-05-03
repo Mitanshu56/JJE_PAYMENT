@@ -291,17 +291,22 @@ class BillController:
             logger.error(f"✗ Error creating bills: {str(e)}")
             raise
     
-    async def get_bill(self, invoice_no: str) -> Optional[dict]:
-        """Get a bill by invoice number."""
+    async def get_bill(self, invoice_no: str, fiscal_year: Optional[str] = None) -> Optional[dict]:
+        """Get a bill by invoice number, optionally scoped to fiscal year."""
         invoice_no = str(invoice_no or '').strip()
         if not invoice_no:
             return None
 
-        return await self.collection.find_one({'invoice_no': invoice_no})
+        query = {'invoice_no': invoice_no}
+        if fiscal_year:
+            query['fiscal_year'] = fiscal_year
+        return await self.collection.find_one(query)
     
-    async def get_bills(self, filters: dict = None, skip: int = 0, limit: int = 100) -> List[dict]:
-        """Get bills with optional filters"""
+    async def get_bills(self, filters: dict = None, skip: int = 0, limit: int = 100, fiscal_year: Optional[str] = None) -> List[dict]:
+        """Get bills with optional filters and optional fiscal year scope"""
         query = filters or {}
+        if fiscal_year:
+            query['fiscal_year'] = fiscal_year
         # Use numeric collation so invoice numbers sort naturally: 1, 2, 3 ... 10.
         cursor = self.collection.find(query).sort([
             ('invoice_no', 1),
@@ -350,19 +355,28 @@ class BillController:
             if party_name in party_to_gst:
                 bill['gst_no'] = party_to_gst[party_name]
     
-    async def get_bills_by_party(self, party_name: str) -> List[dict]:
-        """Get all bills for a party"""
-        return await self.collection.find({'party_name': party_name}).to_list(length=None)
+    async def get_bills_by_party(self, party_name: str, fiscal_year: Optional[str] = None) -> List[dict]:
+        """Get all bills for a party, optionally scoped to fiscal year"""
+        query = {'party_name': party_name}
+        if fiscal_year:
+            query['fiscal_year'] = fiscal_year
+        return await self.collection.find(query).to_list(length=None)
     
-    async def get_unpaid_bills(self) -> List[dict]:
-        """Get all unpaid bills"""
-        return await self.collection.find({'status': BillStatus.UNPAID}).to_list(length=None)
+    async def get_unpaid_bills(self, fiscal_year: Optional[str] = None) -> List[dict]:
+        """Get all unpaid bills, optionally scoped to fiscal year"""
+        query = {'status': BillStatus.UNPAID}
+        if fiscal_year:
+            query['fiscal_year'] = fiscal_year
+        return await self.collection.find(query).to_list(length=None)
     
-    async def update_bill_status(self, invoice_no: str, status: str, paid_amount: float = 0) -> bool:
-        """Update bill status"""
+    async def update_bill_status(self, invoice_no: str, status: str, paid_amount: float = 0, fiscal_year: Optional[str] = None) -> bool:
+        """Update bill status, optionally scoped to fiscal year."""
         try:
+            query = {'invoice_no': invoice_no}
+            if fiscal_year:
+                query['fiscal_year'] = fiscal_year
             result = await self.collection.update_one(
-                {'invoice_no': invoice_no},
+                query,
                 {
                     '$set': {
                         'status': status,
@@ -382,8 +396,12 @@ class BillController:
             update_count = 0
             for bill in bills_data:
                 invoice_no = bill.get('invoice_no')
+                fiscal_year = bill.get('fiscal_year')
+                query = {'invoice_no': invoice_no}
+                if fiscal_year:
+                    query['fiscal_year'] = fiscal_year
                 result = await self.collection.update_one(
-                    {'invoice_no': invoice_no},
+                    query,
                     {
                         '$set': {
                             'status': bill.get('status', BillStatus.UNPAID),
@@ -404,10 +422,13 @@ class BillController:
             logger.error(f"✗ Error bulk updating bills: {str(e)}")
             raise
     
-    async def delete_bill(self, invoice_no: str) -> bool:
-        """Delete a bill"""
+    async def delete_bill(self, invoice_no: str, fiscal_year: Optional[str] = None) -> bool:
+        """Delete a bill, optionally scoped to fiscal year."""
         try:
-            result = await self.collection.delete_one({'invoice_no': invoice_no})
+            query = {'invoice_no': invoice_no}
+            if fiscal_year:
+                query['fiscal_year'] = fiscal_year
+            result = await self.collection.delete_one(query)
             return result.deleted_count > 0
         except Exception as e:
             logger.error(f"✗ Error deleting bill: {str(e)}")

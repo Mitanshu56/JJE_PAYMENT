@@ -1,15 +1,53 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
+import { getSelectedFiscalYear } from '../utils/fiscal'
 import { Eye, EyeOff } from 'lucide-react'
-import { authAPI, authStorage } from '../services/api'
+import { authAPI, authStorage, fiscalAPI } from '../services/api'
 
-export default function Login({ onLoginSuccess }) {
+function getCurrentFiscalYear() {
+  // Use the requested fiscal year label by default rather than computing from date
+  return 'FY-2025-2026'
+}
+
+export default function Login({ onLoginSuccess, refreshKey = 0 }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [fiscalYears, setFiscalYears] = useState([])
+  const [selectedFY, setSelectedFY] = useState(() => {
+    try {
+      return localStorage.getItem('selected_fiscal_year') || 'FY-2025-2026'
+    } catch (e) {
+      return 'FY-2025-2026'
+    }
+  })
   const [loading, setLoading] = useState(false)
+  const [loadingFYs, setLoadingFYs] = useState(false)
   const [sendingReset, setSendingReset] = useState(false)
   const [resetMessage, setResetMessage] = useState('')
   const [error, setError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+
+  useEffect(() => {
+    const loadFiscalYears = async () => {
+      try {
+        setLoadingFYs(true)
+        const res = await fiscalAPI.listYears()
+        const years = (res?.data?.data || []).map((item) => item.value).filter(Boolean)
+        setFiscalYears(years)
+        const storedFY = getSelectedFiscalYear() || ''
+        const nextFY = years.includes(storedFY) ? storedFY : (storedFY || years[0] || getCurrentFiscalYear())
+        setSelectedFY(nextFY)
+        localStorage.setItem('selected_fiscal_year', nextFY)
+      } catch {
+        const currentFY = getSelectedFiscalYear() || getCurrentFiscalYear()
+        setSelectedFY(currentFY)
+        localStorage.setItem('selected_fiscal_year', currentFY)
+      } finally {
+        setLoadingFYs(false)
+      }
+    }
+
+    loadFiscalYears()
+  }, [refreshKey])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -22,6 +60,12 @@ export default function Login({ onLoginSuccess }) {
     }
 
     try {
+      const resolvedFY = selectedFY || getSelectedFiscalYear() || getCurrentFiscalYear()
+      if (resolvedFY) {
+        setSelectedFY(resolvedFY)
+        localStorage.setItem('selected_fiscal_year', resolvedFY)
+        window.dispatchEvent(new CustomEvent('selected-fiscal-year-changed', { detail: resolvedFY }))
+      }
       setLoading(true)
       const res = await authAPI.login(username.trim(), password.trim())
       const token = res?.data?.token
@@ -32,7 +76,7 @@ export default function Login({ onLoginSuccess }) {
       }
 
       authStorage.setToken(token)
-      onLoginSuccess?.(loggedUser)
+      onLoginSuccess?.(loggedUser, res?.data?.role || 'user')
     } catch (err) {
       setError(err?.response?.data?.detail || 'Invalid username or password')
     } finally {
@@ -64,6 +108,26 @@ export default function Login({ onLoginSuccess }) {
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Fiscal Year</label>
+            <select
+              value={selectedFY}
+              onChange={(e) => setSelectedFY(e.target.value)}
+              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              {!selectedFY && <option value="">Select fiscal year</option>}
+              {fiscalYears.map((fy) => (
+                <option key={fy} value={fy}>{fy}</option>
+              ))}
+              {fiscalYears.length === 0 && selectedFY && (
+                <option value={selectedFY}>{selectedFY}</option>
+              )}
+            </select>
+            <p className="mt-1 text-xs text-slate-500">
+              {loadingFYs ? 'Loading fiscal years...' : 'Choose the FY before signing in.'}
+            </p>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
             <input

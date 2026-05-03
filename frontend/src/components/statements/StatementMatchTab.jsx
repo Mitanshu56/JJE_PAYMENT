@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { statementsAPI } from '../../services/api'
+import { getSelectedFiscalYear } from '../../utils/fiscal'
 
 const PAGE_SIZE = 200
 
@@ -82,6 +83,7 @@ export default function StatementMatchTab({ onDataChanged }) {
   const [partySearch, setPartySearch] = useState('')
   const [partyDropdownOpen, setPartyDropdownOpen] = useState(false)
   const [matchFilter, setMatchFilter] = useState('all')
+  const [fiscalYear, setFiscalYear] = useState(() => getSelectedFiscalYear())
   const [loading, setLoading] = useState(false)
   const [confirmingMap, setConfirmingMap] = useState({})
   const [error, setError] = useState('')
@@ -165,13 +167,14 @@ export default function StatementMatchTab({ onDataChanged }) {
     return Array.from(groups.values())
   }, [filteredRows])
 
-  const loadRows = async (nextFilters = filters) => {
+  const loadRows = async (nextFilters = filters, nextFiscalYear = fiscalYear) => {
     try {
       setLoading(true)
       setError('')
 
       const matchRes = await statementsAPI.getMatch({
         ...nextFilters,
+        fiscalYear: nextFiscalYear || undefined,
         neftOnly: true,
       })
 
@@ -202,9 +205,20 @@ export default function StatementMatchTab({ onDataChanged }) {
   }
 
   useEffect(() => {
-    loadRows(filters)
+    loadRows(filters, fiscalYear)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.page])
+  }, [filters.page, fiscalYear])
+
+  useEffect(() => {
+    const handleFiscalYearChange = (event) => {
+      const nextFiscalYear = event?.detail || getSelectedFiscalYear() || ''
+      setFiscalYear(nextFiscalYear)
+      setFilters((prev) => ({ ...prev, page: 1 }))
+    }
+
+    window.addEventListener('selected-fiscal-year-changed', handleFiscalYearChange)
+    return () => window.removeEventListener('selected-fiscal-year-changed', handleFiscalYearChange)
+  }, [])
 
   const handleToggleInvoiceConfirm = async (group, invoice, checked) => {
     const groupKey = String(group?.key || '')
@@ -250,7 +264,7 @@ export default function StatementMatchTab({ onDataChanged }) {
         })
       }
 
-      await loadRows(filters)
+      await loadRows(filters, fiscalYear)
       if (typeof onDataChanged === 'function') {
         await onDataChanged()
       }
@@ -269,6 +283,9 @@ export default function StatementMatchTab({ onDataChanged }) {
             <h3 className="text-lg font-semibold text-gray-900">Statement Match</h3>
             <p className="text-sm text-gray-600 mt-1">
               Search by NEFT extracted party name and view mapped invoice payment details.
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Current financial year: <span className="font-semibold">{fiscalYear || 'Not selected'}</span>
             </p>
           </div>
 

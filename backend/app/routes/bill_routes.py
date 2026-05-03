@@ -1,7 +1,7 @@
 """
 Bill management API routes
 """
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from typing import Optional, List
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from datetime import datetime
@@ -102,11 +102,13 @@ async def get_bills(
     month: Optional[int] = Query(None, ge=1, le=12),
     latest_upload_only: bool = Query(False),
     upload_batch_id: Optional[str] = None,
+    request: Request = None,
     db: AsyncIOMotorDatabase = Depends(get_db)
 ):
     """Get all bills with optional filters"""
     try:
         controller = BillController(db)
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
         filters = {}
         
         if status:
@@ -133,8 +135,8 @@ async def get_bills(
                 # If no batch metadata exists yet, keep backward-compatible behavior.
                 latest_upload_only = False
         
-        bills = await controller.get_bills(filters, skip, limit)
-        total = await controller.count_bills(filters)
+        bills = await controller.get_bills(filters, skip, limit, fiscal_year=fiscal)
+        total = await controller.count_bills(filters if not fiscal else {**filters, 'fiscal_year': fiscal})
         
         # Convert ObjectId to string
         for bill in bills:
@@ -158,11 +160,12 @@ async def get_bills(
 
 
 @router.get("/{invoice_no}")
-async def get_bill(invoice_no: str, db: AsyncIOMotorDatabase = Depends(get_db)):
+async def get_bill(invoice_no: str, request: Request = None, db: AsyncIOMotorDatabase = Depends(get_db)):
     """Get a specific bill by invoice number"""
     try:
         controller = BillController(db)
-        bill = await controller.get_bill(invoice_no)
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+        bill = await controller.get_bill(invoice_no, fiscal_year=fiscal)
 
         if not bill:
             raise HTTPException(status_code=404, detail="Bill not found")
@@ -184,11 +187,12 @@ async def get_bill(invoice_no: str, db: AsyncIOMotorDatabase = Depends(get_db)):
 
 
 @router.get("/party/{party_name}")
-async def get_bills_by_party(party_name: str, db: AsyncIOMotorDatabase = Depends(get_db)):
+async def get_bills_by_party(party_name: str, request: Request = None, db: AsyncIOMotorDatabase = Depends(get_db)):
     """Get all bills for a specific party"""
     try:
         controller = BillController(db)
-        bills = await controller.get_bills_by_party(party_name)
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+        bills = await controller.get_bills_by_party(party_name, fiscal_year=fiscal)
         
         # Convert ObjectId to string
         for bill in bills:
@@ -240,16 +244,17 @@ async def delete_bill_by_id(bill_id: str, db: AsyncIOMotorDatabase = Depends(get
 
 
 @router.delete("/{invoice_no}")
-async def delete_bill(invoice_no: str, db: AsyncIOMotorDatabase = Depends(get_db)):
+async def delete_bill(invoice_no: str, request: Request = None, db: AsyncIOMotorDatabase = Depends(get_db)):
     """Delete a bill by invoice number (legacy path)."""
     try:
         controller = BillController(db)
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
 
-        existing_bill = await controller.get_bill(invoice_no)
+        existing_bill = await controller.get_bill(invoice_no, fiscal_year=fiscal)
         if not existing_bill:
             raise HTTPException(status_code=404, detail="Bill not found")
 
-        success = await controller.delete_bill(invoice_no)
+        success = await controller.delete_bill(invoice_no, fiscal_year=fiscal)
         if not success:
             raise HTTPException(status_code=404, detail="Bill not found")
 

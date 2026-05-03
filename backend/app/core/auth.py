@@ -27,10 +27,10 @@ def _sign_payload(payload: str) -> str:
     return base64.urlsafe_b64encode(signature).decode("utf-8").rstrip("=")
 
 
-def create_token(username: str) -> str:
+def create_token(username: str, role: str = "user") -> str:
     """Create a signed token with expiration."""
     expires_at = int(time.time()) + (settings.AUTH_TOKEN_EXPIRE_HOURS * 3600)
-    payload_obj = {"sub": username, "exp": expires_at}
+    payload_obj = {"sub": username, "role": role, "exp": expires_at}
     payload = base64.urlsafe_b64encode(json.dumps(payload_obj).encode("utf-8")).decode("utf-8").rstrip("=")
     signature = _sign_payload(payload)
     return f"{payload}.{signature}"

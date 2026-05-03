@@ -1,44 +1,40 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Menu, X } from 'lucide-react'
 import { fiscalAPI } from '../services/api'
-import { useEffect } from 'react'
+import { getSelectedFiscalYear } from '../utils/fiscal'
 
-export default function Header({ onUploadClick, onLogout, onNavigate, currentUser, activeTab = 'summary' }) {
+export default function Header({ onUploadClick, onLogout, onNavigate, currentUser, activeTab = 'summary', refreshKey = 0 }) {
   const [menuOpen, setMenuOpen] = useState(false)
-  const [fiscalYears, setFiscalYears] = useState([])
-  const [selectedFY, setSelectedFY] = useState(() => localStorage.getItem('selected_fiscal_year') || '')
+  const [selectedFY, setSelectedFY] = useState(() => getSelectedFiscalYear())
 
   useEffect(() => {
     const load = async () => {
       try {
         const res = await fiscalAPI.listYears()
-        const list = (res?.data?.data || []).map((d) => d.value)
-        setFiscalYears(list)
-        if (!selectedFY && list.length) {
-          setSelectedFY(list[0])
-          localStorage.setItem('selected_fiscal_year', list[0])
-        }
-        // if backend returns no FYs, default to client-side current FY
-        if (!selectedFY && !list.length) {
-          const now = new Date();
-          const y = now.getFullYear();
-          const m = now.getMonth() + 1;
-          const fy = m >= 4 ? `FY-${y}-${y+1}` : `FY-${y-1}-${y}`
-          setSelectedFY(fy)
-          localStorage.setItem('selected_fiscal_year', fy)
-        }
+        const list = (res?.data?.data || []).map((d) => d.value).filter(Boolean)
+        const storedFY = getSelectedFiscalYear() || ''
+        const nextFY = list.includes(storedFY) ? storedFY : (storedFY || list[0] || 'FY-2025-2026')
+        setSelectedFY(nextFY)
+        localStorage.setItem('selected_fiscal_year', nextFY)
       } catch (err) {
         // ignore
       }
     }
     load()
-  }, [])
+  }, [refreshKey])
 
-  const handleFYChange = (e) => {
-    const v = e.target.value
-    setSelectedFY(v)
-    localStorage.setItem('selected_fiscal_year', v)
-  }
+  useEffect(() => {
+    const handleFYChange = (event) => {
+      const nextFY = event?.detail || getSelectedFiscalYear()
+      if (nextFY) {
+        setSelectedFY(nextFY)
+        localStorage.setItem('selected_fiscal_year', nextFY)
+      }
+    }
+
+    window.addEventListener('selected-fiscal-year-changed', handleFYChange)
+    return () => window.removeEventListener('selected-fiscal-year-changed', handleFYChange)
+  }, [])
 
   const navClass = (tab, mobile = false) => {
     const base = mobile
@@ -76,11 +72,9 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
         </div>
 
         <nav className="hidden md:flex items-center gap-6">
-          <select value={selectedFY} onChange={handleFYChange} className="border border-gray-300 rounded-md px-2 py-1 text-sm">
-            {fiscalYears.map((fy) => (
-              <option key={fy} value={fy}>{fy}</option>
-            ))}
-          </select>
+          <span className="border border-gray-200 rounded-md px-3 py-1.5 text-sm text-gray-700 bg-gray-50">
+            {selectedFY || 'No FY selected'}
+          </span>
           <button type="button" onClick={() => handleNavigate('summary')} className={navClass('summary')}>
             Dashboard
           </button>
@@ -113,11 +107,9 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
 
       {menuOpen && (
         <div className="md:hidden border-t border-gray-200 p-4 space-y-3">
-            <select value={selectedFY} onChange={handleFYChange} className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
-              {fiscalYears.map((fy) => (
-                <option key={fy} value={fy}>{fy}</option>
-              ))}
-            </select>
+          <div className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700 bg-gray-50">
+            {selectedFY || 'No FY selected'}
+          </div>
           <button type="button" onClick={() => handleNavigate('summary')} className={navClass('summary', true)}>
             Dashboard
           </button>

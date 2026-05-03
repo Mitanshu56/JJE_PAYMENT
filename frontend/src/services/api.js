@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { getSelectedFiscalYear } from '../utils/fiscal'
 
 const API_BASE_URL = 'http://localhost:8000'
 const AUTH_TOKEN_KEY = 'jje_auth_token'
@@ -23,7 +24,7 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`
   }
   // Attach selected fiscal year if present
-  const selectedFY = localStorage.getItem('selected_fiscal_year')
+  const selectedFY = getSelectedFiscalYear()
   if (selectedFY) {
     config.headers = config.headers || {}
     config.headers['X-Fiscal-Year'] = selectedFY
@@ -51,6 +52,8 @@ export const authAPI = {
 
 export const fiscalAPI = {
   listYears: () => api.get('/api/fiscal/years'),
+  createYear: (payload) => api.post('/api/fiscal/years', payload),
+  deleteYear: (fiscalYear, password) => api.delete(`/api/fiscal/years/${encodeURIComponent(fiscalYear)}`, { data: { password } }),
 }
 
 // Bills API

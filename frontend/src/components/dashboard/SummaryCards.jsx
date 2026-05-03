@@ -5,7 +5,10 @@ export default function SummaryCards({ summary }) {
   const safeSummary = summary || {}
   const paidPercentage = Number(safeSummary.paid_percentage || 0)
   const invoiceStats = safeSummary.invoice_stats || {}
-  const receivedByMode = Array.isArray(safeSummary.received_by_mode) ? safeSummary.received_by_mode : []
+
+  const receivedByMode = Array.isArray(safeSummary.received_by_mode)
+    ? safeSummary.received_by_mode
+    : []
 
   const receivedModeRows = receivedByMode.length
     ? receivedByMode
@@ -55,28 +58,48 @@ export default function SummaryCards({ summary }) {
   ]
 
   return (
-    <>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-        {cards.map((card, idx) => {
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+      {cards.map((card, idx) => {
         const Icon = card.icon
+
         return (
-          <div key={idx} className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="text-gray-600 text-sm font-medium">{card.title}</p>
+          <div
+            key={idx}
+            className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_8px_30px_rgba(15,23,42,0.06)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_40px_rgba(15,23,42,0.12)]"
+          >
+            {/* Top color bar */}
+            <div className={`absolute inset-x-0 top-0 h-1 ${card.color}`} />
+
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">
+                  {card.title}
+                </p>
+
+                {/* Popup for payment mode */}
                 {card.showReceivedModesPopup && (
-                  <div className="relative mt-2 inline-block group">
-                    <div className="inline-flex items-center px-2 py-1 rounded-md border border-gray-200 text-xs font-medium text-gray-600 bg-gray-50 cursor-default">
+                  <div className="relative mt-2 group">
+                    <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
                       Mode-wise breakdown
                     </div>
-                    <div className="pointer-events-none absolute left-0 top-full mt-2 w-72 rounded-lg border border-gray-200 bg-white shadow-xl p-3 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                      <div className="text-xs font-semibold text-gray-700 mb-2">Received by payment mode</div>
+
+                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-3 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+                      <div className="mb-2 text-xs font-semibold text-slate-700">
+                        Received by payment mode
+                      </div>
+
                       <div className="space-y-1.5">
                         {receivedModeRows.map((row) => (
-                          <div key={row.mode} className="flex items-center justify-between text-xs">
-                            <span className="text-gray-600">{row.mode}</span>
-                            <span className="font-semibold text-gray-900">
-                              ₹{Number(row.amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          <div
+                            key={row.mode}
+                            className="flex items-center justify-between text-xs"
+                          >
+                            <span className="text-slate-600">{row.mode}</span>
+                            <span className="font-semibold text-slate-900">
+                              ₹
+                              {Number(row.amount || 0).toLocaleString('en-IN', {
+                                maximumFractionDigits: 2,
+                              })}
                             </span>
                           </div>
                         ))}
@@ -84,20 +107,34 @@ export default function SummaryCards({ summary }) {
                     </div>
                   </div>
                 )}
-                <h3 className="text-2xl font-bold text-gray-900 mt-2">{card.value}</h3>
-                {card.subtext && <p className="text-gray-500 text-xs mt-2 leading-relaxed">{card.subtext}</p>}
+
+                <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
+                  {card.value}
+                </h3>
+
+                {card.subtext && (
+                  <p className="mt-2 text-xs text-slate-500">
+                    {card.subtext}
+                  </p>
+                )}
+
                 {card.change && (
-                  <p className="text-green-600 text-sm font-medium mt-2">{card.change}</p>
+                  <p className="mt-2 text-sm font-medium text-emerald-600">
+                    {card.change}
+                  </p>
                 )}
               </div>
-              <div className={`${card.color} p-3 rounded-lg text-white`}>
-                <Icon size={24} />
+
+              {/* Icon */}
+              <div
+                className={`flex h-12 w-12 items-center justify-center rounded-2xl ${card.color} text-white shadow-lg`}
+              >
+                <Icon size={22} />
               </div>
             </div>
           </div>
         )
-        })}
-      </div>
-    </>
+      })}
+    </div>
   )
 }
