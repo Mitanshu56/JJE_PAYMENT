@@ -128,5 +128,3 @@ async def run_scheduler_loop(db):
 
         # Sleep until next day (approx)
         await asyncio.sleep(24 * 60 * 60)
-
-*** End Patch

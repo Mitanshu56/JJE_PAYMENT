@@ -160,5 +160,3 @@ async def get_history_by_party(party_name: str, limit: int = 100, db: AsyncIOMot
         if '_id' in d:
             d['_id'] = str(d['_id'])
     return {'status': 'success', 'history': docs}
-
-*** End Patch

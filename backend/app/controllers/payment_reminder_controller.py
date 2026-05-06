@@ -80,5 +80,3 @@ class PaymentReminderController:
             if '_id' in d:
                 d['_id'] = str(d['_id'])
         return docs
-
-*** End Patch

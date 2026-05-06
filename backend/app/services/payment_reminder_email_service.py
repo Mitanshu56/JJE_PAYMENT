@@ -85,6 +85,3 @@ def send_multiple_invoice_reminder(party_name: str, party_email: str, invoices: 
     subject = "Payment Reminder - Pending Invoices"
     body = build_multiple_invoice_body(party_name, invoices, total_pending)
     _send_email(subject, party_email, body)
-    return
-
-*** End Patch

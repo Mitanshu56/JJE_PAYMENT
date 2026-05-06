@@ -29,5 +29,3 @@ class PaymentReminderHistory(BaseModel):
     email_status: str = Field(default="sent", description="sent|failed")
     sent_at: datetime = Field(default_factory=datetime.utcnow)
     error_message: Optional[str] = None
-
-*** End Patch

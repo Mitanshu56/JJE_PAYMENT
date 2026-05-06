@@ -196,5 +196,3 @@ function PaymentReminder() {
 }
 
 export default PaymentReminder
-
-*** End Patch
