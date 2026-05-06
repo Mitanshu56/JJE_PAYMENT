@@ -1,7 +1,12 @@
 """
 Database connection and initialization
 """
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from typing import Any
+try:
+    from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+except Exception:
+    AsyncIOMotorClient = Any
+    AsyncIOMotorDatabase = Any
 from app.core.config import settings
 import logging
 
@@ -41,6 +46,15 @@ async def close_db():
 async def create_indexes():
     """Create database indexes for performance"""
     try:
+        async def safe_create_index(collection, *args, **kwargs):
+            try:
+                await collection.create_index(*args, **kwargs)
+            except Exception as exc:
+                if 'same name as the requested index' in str(exc) or getattr(exc, 'code', None) == 86:
+                    logger.info("Index already exists, skipping: %s %s", args, kwargs)
+                    return
+                raise
+
         # Bills indexes
         bills_col = db["bills"]
         # Migrate from legacy unique invoice_no index to invoice_key uniqueness.
@@ -49,44 +63,44 @@ async def create_indexes():
         except Exception:
             pass
 
-        await bills_col.create_index("invoice_key", unique=True, sparse=True)
-        await bills_col.create_index("invoice_no")
-        await bills_col.create_index("party_name")
-        await bills_col.create_index("invoice_date")
-        await bills_col.create_index("status")
-        await bills_col.create_index([("last_upload_batch_id", 1), ("created_at", -1)])
+        await safe_create_index(bills_col, "invoice_key", unique=True, sparse=True)
+        await safe_create_index(bills_col, "invoice_no")
+        await safe_create_index(bills_col, "party_name")
+        await safe_create_index(bills_col, "invoice_date")
+        await safe_create_index(bills_col, "status")
+        await safe_create_index(bills_col, [("last_upload_batch_id", 1), ("created_at", -1)])
         
         # Payments indexes
         payments_col = db["payments"]
-        await payments_col.create_index("payment_id", unique=True, sparse=True)
-        await payments_col.create_index("party_name")
-        await payments_col.create_index("payment_date")
-        await payments_col.create_index("reference")
+        await safe_create_index(payments_col, "payment_id", unique=True, sparse=True)
+        await safe_create_index(payments_col, "party_name")
+        await safe_create_index(payments_col, "payment_date")
+        await safe_create_index(payments_col, "reference")
         
         # Parties indexes
         parties_col = db["parties"]
-        await parties_col.create_index("party_name", unique=True, sparse=True)
+        await safe_create_index(parties_col, "party_name", unique=True, sparse=True)
         
         # Upload logs
         logs_col = db["upload_logs"]
-        await logs_col.create_index("created_at")
-        await logs_col.create_index("file_name")
-        await logs_col.create_index([("file_type", 1), ("created_at", -1)])
+        await safe_create_index(logs_col, "created_at")
+        await safe_create_index(logs_col, "file_name")
+        await safe_create_index(logs_col, [("file_type", 1), ("created_at", -1)])
 
         # Authentication reset tokens
         reset_tokens_col = db["password_reset_tokens"]
-        await reset_tokens_col.create_index("token_hash", unique=True)
-        await reset_tokens_col.create_index("expires_at", expireAfterSeconds=0)
+        await safe_create_index(reset_tokens_col, "token_hash", unique=True)
+        await safe_create_index(reset_tokens_col, "expires_at", expireAfterSeconds=0)
 
         # Authentication settings
         auth_settings_col = db["auth_settings"]
-        await auth_settings_col.create_index("_id", unique=True)
+        await safe_create_index(auth_settings_col, "_id")
 
         # Statement entries indexes
         statements_col = db["statement_entries"]
-        await statements_col.create_index("month_key")
-        await statements_col.create_index("value_date")
-        await statements_col.create_index("upload_batch_id")
+        await safe_create_index(statements_col, "month_key")
+        await safe_create_index(statements_col, "value_date")
+        await safe_create_index(statements_col, "upload_batch_id")
         
         # Fiscal year master and FY-aware indexes
         fiscal_col = db["fiscal_years"]
@@ -101,17 +115,17 @@ async def create_indexes():
 
         # Add FY-related indexes on main collections
         try:
-            await bills_col.create_index([("fiscal_year", 1), ("invoice_key", 1)], unique=True, sparse=True)
+            await safe_create_index(bills_col, [("fiscal_year", 1), ("invoice_key", 1)], unique=True, sparse=True)
         except Exception:
             # ignore if index exists or invalid
             pass
         try:
-            await payments_col.create_index([("fiscal_year", 1), ("payment_id", 1)], unique=True, sparse=True)
+            await safe_create_index(payments_col, [("fiscal_year", 1), ("payment_id", 1)], unique=True, sparse=True)
         except Exception:
             pass
         try:
-            await bills_col.create_index([("fiscal_year", 1), ("party_name", 1)])
-            await payments_col.create_index([("fiscal_year", 1), ("party_name", 1)])
+            await safe_create_index(bills_col, [("fiscal_year", 1), ("party_name", 1)])
+            await safe_create_index(payments_col, [("fiscal_year", 1), ("party_name", 1)])
         except Exception:
             pass
         

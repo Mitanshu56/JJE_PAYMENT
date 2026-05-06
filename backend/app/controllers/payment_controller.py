@@ -3,7 +3,11 @@ Payment controller for handling payment-related business logic
 """
 from typing import List, Optional
 from datetime import datetime
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from typing import Any
+try:
+    from motor.motor_asyncio import AsyncIOMotorDatabase
+except Exception:
+    AsyncIOMotorDatabase = Any
 import logging
 
 logger = logging.getLogger(__name__)

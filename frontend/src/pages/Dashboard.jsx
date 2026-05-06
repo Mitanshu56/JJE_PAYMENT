@@ -7,6 +7,7 @@ import ManagePayments from '../components/payments/ManagePayments'
 import StatementTab from '../components/statements/StatementTab'
 import StatementMatchTab from '../components/statements/StatementMatchTab'
 import Charts from '../components/charts/Charts'
+import ChatBot from '../components/ChatBot'
 import { fiscalAPI } from '../services/api'
 import { getSelectedFiscalYear } from '../utils/fiscal'
 import '../components/dashboard/Dashboard.css'
@@ -366,6 +367,9 @@ const Dashboard = forwardRef(function Dashboard({ onActiveTabChange, currentRole
             <StatementMatchTab onDataChanged={loadDashboardData} />
           )}
         </div>
+
+        {/* ChatBot Widget */}
+        <ChatBot fiscalYear={currentFY} />
       </div>
     </div>
   )
