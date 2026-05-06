@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from app.core.config import settings, logger
 from app.core.auth import decode_token
 from app.core.database import connect_db, close_db
-from app.routes import auth_routes, upload_routes, bill_routes, payment_routes, dashboard_routes, fiscal_routes
+from app.routes import auth_routes, upload_routes, bill_routes, payment_routes, dashboard_routes, fiscal_routes, chatbot_routes
 
 
 @asynccontextmanager
@@ -62,6 +62,7 @@ async def auth_middleware(request: Request, call_next):
         "/api/auth/reset-password",
         "/api/auth/reset-password/validate",
         "/api/health",
+        "/api/chatbot/llm/test/public",  # Public LLM test endpoint for debugging
     }
 
     if path.startswith("/api") and not (path == "/api/fiscal/years" and request.method == "GET") and path not in public_paths:
@@ -98,6 +99,7 @@ app.include_router(bill_routes.router)
 app.include_router(payment_routes.router)
 app.include_router(dashboard_routes.router)
 app.include_router(fiscal_routes.router)
+app.include_router(chatbot_routes.router)
 
 
 @app.get("/")

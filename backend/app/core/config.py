@@ -52,6 +52,23 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM_EMAIL: str = ""
     
+    # LLM / Provider configuration
+    # LLM_PROVIDER: 'openai', 'openrouter', 'deepseek', or 'groq'
+    LLM_PROVIDER: str = "groq"
+    # Generic model identifier used by the LLM client
+    LLM_MODEL: str = "llama-3.1-8b-instant"
+    # Deepseek API key and base URL
+    DEEPSEEK_API_KEY: Optional[str] = None
+    DEEPSEEK_API_BASE: str = "https://api.deepseek.com"
+    # OpenRouter API key and base URL
+    OPENROUTER_API_KEY: Optional[str] = None
+    OPENROUTER_API_BASE: str = "https://api.openrouter.ai"
+    # Groq API key and base URL (OpenAI-compatible)
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_API_BASE: str = "https://api.groq.com/openai/v1"
+    # OpenAI API key
+    OPENAI_API_KEY: Optional[str] = None
+    
     class Config:
         env_file = str(ENV_FILE)
         case_sensitive = True

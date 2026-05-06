@@ -3,7 +3,11 @@ Bill controller for handling bill-related business logic
 """
 from typing import List, Optional
 from datetime import datetime
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from typing import Any
+try:
+    from motor.motor_asyncio import AsyncIOMotorDatabase
+except Exception:
+    AsyncIOMotorDatabase = Any
 from app.models.bill import Bill, BillStatus
 from bson import ObjectId
 import re

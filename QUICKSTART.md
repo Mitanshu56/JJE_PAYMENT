@@ -2,7 +2,17 @@
 
 ## 🚀 Get Started in 5 Minutes
 
-## uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+<!-- API keys removed. Do NOT commit secrets. Store keys in a .env file and add it to .gitignore. -->
+
+Replace the following environment variables in your local `.env` file:
+
+- `OPENAI_API_KEY` or `OPEN_ROUTER_API_KEY`
+- `GROQ_API_KEY`
+- `VENICE_ADMIN_KEY`
+
+See the README or `.env.example` for variable names and setup instructions.
 
 ### Prerequisites
 - Python 3.9+
