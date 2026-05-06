@@ -154,4 +154,14 @@ export const dashboardAPI = {
   matchPayments: () => api.post('/api/match-payments'),
 }
 
+export const paymentRemindersAPI = {
+  listParties: () => api.get('/api/payment-reminders/parties'),
+  getParty: (partyName) => api.get(`/api/payment-reminders/party/${encodeURIComponent(partyName)}`),
+  savePartyEmail: (payload) => api.post('/api/payment-reminders/party-email', payload),
+  sendSingle: (payload) => api.post('/api/payment-reminders/send-single', payload),
+  sendMultiple: (payload) => api.post('/api/payment-reminders/send-multiple', payload),
+  getHistory: (limit=100) => api.get(`/api/payment-reminders/history?limit=${limit}`),
+  getHistoryByParty: (partyName, limit=100) => api.get(`/api/payment-reminders/history/${encodeURIComponent(partyName)}?limit=${limit}`),
+}
+
 export default api

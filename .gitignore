@@ -24,12 +24,14 @@ frontend/.env.*.local
 *.swn
 *~
 .DS_Store
+*.md
 *.sublime-project
 *.sublime-workspace
 
 # OS
 Thumbs.db
 .DS_Store
+.md
 
 # Logs
 *.log

@@ -8,6 +8,7 @@ import StatementTab from '../components/statements/StatementTab'
 import StatementMatchTab from '../components/statements/StatementMatchTab'
 import Charts from '../components/charts/Charts'
 import ChatBot from '../components/ChatBot'
+import PaymentReminder from './PaymentReminder'
 import { fiscalAPI } from '../services/api'
 import { getSelectedFiscalYear } from '../utils/fiscal'
 import '../components/dashboard/Dashboard.css'
@@ -343,6 +344,16 @@ const Dashboard = forwardRef(function Dashboard({ onActiveTabChange, currentRole
             >
               Statement Match
             </button>
+            <button
+              onClick={() => setActiveTab('payment-reminder')}
+              className={`pb-3 px-4 font-medium border-b-2 transition ${
+                activeTab === 'payment-reminder'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Payment Reminder
+            </button>
           </div>
         </div>
 
@@ -365,6 +376,9 @@ const Dashboard = forwardRef(function Dashboard({ onActiveTabChange, currentRole
           )}
           {activeTab === 'statement-match' && (
             <StatementMatchTab onDataChanged={loadDashboardData} />
+          )}
+          {activeTab === 'payment-reminder' && (
+            <PaymentReminder />
           )}
         </div>
 
