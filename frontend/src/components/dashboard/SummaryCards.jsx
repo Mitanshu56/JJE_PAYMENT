@@ -65,7 +65,7 @@ export default function SummaryCards({ summary }) {
         return (
           <div
             key={idx}
-            className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_8px_30px_rgba(15,23,42,0.06)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_40px_rgba(15,23,42,0.12)]"
+            className="relative overflow-visible rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_8px_30px_rgba(15,23,42,0.06)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_40px_rgba(15,23,42,0.12)]"
           >
             {/* Top color bar */}
             <div className={`absolute inset-x-0 top-0 h-1 ${card.color}`} />
@@ -79,22 +79,25 @@ export default function SummaryCards({ summary }) {
                 {/* Popup for payment mode */}
                 {card.showReceivedModesPopup && (
                   <div className="relative mt-2 group">
-                    <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                    <button
+                      type="button"
+                      className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+                    >
                       Mode-wise breakdown
-                    </div>
+                    </button>
 
-                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-3 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
-                      <div className="mb-2 text-xs font-semibold text-slate-700">
+                    <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-full z-50 mt-2 w-80 rounded-xl border border-slate-200 bg-white p-4 opacity-0 shadow-2xl transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+                      <div className="mb-3 text-xs font-semibold text-slate-700">
                         Received by payment mode
                       </div>
 
-                      <div className="space-y-1.5">
+                      <div className="space-y-2">
                         {receivedModeRows.map((row) => (
                           <div
                             key={row.mode}
-                            className="flex items-center justify-between text-xs"
+                            className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-xs hover:bg-slate-100 transition-colors"
                           >
-                            <span className="text-slate-600">{row.mode}</span>
+                            <span className="text-slate-600 font-medium">{row.mode}</span>
                             <span className="font-semibold text-slate-900">
                               ₹
                               {Number(row.amount || 0).toLocaleString('en-IN', {

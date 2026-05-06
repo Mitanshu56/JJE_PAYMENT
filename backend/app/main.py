@@ -6,8 +6,9 @@ from contextlib import asynccontextmanager
 from app.core.config import settings, logger
 from app.core.auth import decode_token
 from app.core.database import connect_db, close_db
-from app.routes import auth_routes, upload_routes, bill_routes, payment_routes, dashboard_routes, fiscal_routes, chatbot_routes, payment_reminder_routes
+from app.routes import auth_routes, upload_routes, bill_routes, payment_routes, dashboard_routes, fiscal_routes, chatbot_routes, payment_reminder_routes, notification_routes
 from app.services.payment_reminder_scheduler import run_scheduler_loop
+from app.services.notification_scheduler import run_notification_checker_loop
 import app.core.database as database
 
 
@@ -27,19 +28,23 @@ async def lifespan(app: FastAPI):
                 db_instance = database.db
                 if db_instance is not None:
                     app.state._payment_reminder_task = asyncio.create_task(run_scheduler_loop(db_instance))
+                    app.state._notification_checker_task = asyncio.create_task(run_notification_checker_loop(db_instance))
             except Exception:
-                logger.error("Payment reminder scheduler could not access database instance")
+                logger.error("Scheduler tasks could not access database instance")
         except Exception as exc:
-            logger.error(f"Failed to start payment reminder scheduler: {exc}")
+            logger.error(f"Failed to start schedulers: {exc}")
     except Exception as exc:
         logger.error(f"Database startup failed. Continuing in degraded mode: {exc}")
     yield
     # Shutdown
     logger.info("🛑 Shutting down...")
     try:
-        # cancel scheduled task if running
+        # cancel scheduled tasks if running
         try:
             task = getattr(app.state, '_payment_reminder_task', None)
+            if task and not task.done():
+                task.cancel()
+            task = getattr(app.state, '_notification_checker_task', None)
             if task and not task.done():
                 task.cancel()
         except Exception:
@@ -121,6 +126,7 @@ app.include_router(dashboard_routes.router)
 app.include_router(fiscal_routes.router)
 app.include_router(chatbot_routes.router)
 app.include_router(payment_reminder_routes.router)
+app.include_router(notification_routes.router)
 
 
 @app.get("/")

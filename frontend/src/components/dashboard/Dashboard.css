@@ -299,3 +299,49 @@
   padding-top: 16px;
   padding-bottom: 16px;
 }
+
+/* Total Received Card - Mode Breakdown Popup Styles */
+.dashboard-container {
+  overflow: visible !important;
+}
+
+.summary-card,
+.stats-card,
+.dashboard-card-wrapper {
+  overflow: visible !important;
+  position: relative;
+}
+
+/* Ensures popup doesn't get clipped */
+.group {
+  position: relative;
+}
+
+.group > div:last-child {
+  pointer-events: none;
+}
+
+.group:hover > div:last-child {
+  pointer-events: auto;
+}
+
+/* Mobile responsive for popup */
+@media (max-width: 768px) {
+  .dashboard-container {
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .summary-card {
+    padding: 16px;
+  }
+
+  /* Ensure popup is visible on mobile */
+  .group > div[class*='absolute'] {
+    width: calc(100vw - 32px) !important;
+    max-width: 100% !important;
+    left: auto !important;
+    right: 0 !important;
+    transform: translateX(-16px) !important;
+  }
+}

@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     SMTP_USERNAME: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_FROM_EMAIL: str = ""
+
+    # Gmail reply inbox monitoring
+    EMAIL_USER: Optional[str] = None
+    EMAIL_PASS: Optional[str] = None
+    IMAP_HOST: str = "imap.gmail.com"
+    IMAP_PORT: int = 993
     
     # LLM / Provider configuration
     # LLM_PROVIDER: 'openai', 'openrouter', 'deepseek', or 'groq'

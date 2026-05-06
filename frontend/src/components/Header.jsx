@@ -1,11 +1,42 @@
 import React, { useEffect, useState } from 'react'
-import { Menu, X } from 'lucide-react'
+import { Menu, X, Bell } from 'lucide-react'
 import { fiscalAPI } from '../services/api'
 import { getSelectedFiscalYear } from '../utils/fiscal'
+import notificationsAPI from '../services/notificationsAPI'
+import NotificationDropdown from './NotificationDropdown'
 
 export default function Header({ onUploadClick, onLogout, onNavigate, currentUser, activeTab = 'summary', refreshKey = 0 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [selectedFY, setSelectedFY] = useState(() => getSelectedFiscalYear())
+  const [notificationOpen, setNotificationOpen] = useState(false)
+  const [notifications, setNotifications] = useState([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [loadingNotifications, setLoadingNotifications] = useState(false)
+
+  // Load notifications
+  const loadNotifications = async () => {
+    try {
+      setLoadingNotifications(true)
+      const res = await notificationsAPI.getNotifications(0, 20)
+      const countRes = await notificationsAPI.getUnreadCount()
+      
+      if (res?.data?.notifications) {
+        setNotifications(res.data.notifications)
+      }
+      if (countRes?.data?.unread_count !== undefined) {
+        setUnreadCount(countRes.data.unread_count)
+      }
+    } catch (err) {
+      console.error('Error loading notifications:', err)
+    } finally {
+      setLoadingNotifications(false)
+    }
+  }
+
+  const handleMarkRead = () => {
+    // Reload notifications when one is marked read
+    loadNotifications()
+  }
 
   useEffect(() => {
     const load = async () => {
@@ -21,6 +52,8 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
       }
     }
     load()
+    // Load notifications on mount
+    loadNotifications()
   }, [refreshKey])
 
   useEffect(() => {
@@ -34,6 +67,15 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
 
     window.addEventListener('selected-fiscal-year-changed', handleFYChange)
     return () => window.removeEventListener('selected-fiscal-year-changed', handleFYChange)
+  }, [])
+
+  // Auto-refresh notifications every 45 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadNotifications()
+    }, 45000)
+    
+    return () => clearInterval(interval)
   }, [])
 
   const navClass = (tab, mobile = false) => {
@@ -90,6 +132,31 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
           >
             Upload
           </button>
+
+          {/* Notification Bell */}
+          <div className="relative">
+            <button
+              onClick={() => setNotificationOpen(!notificationOpen)}
+              className="relative text-gray-600 hover:text-gray-900 transition-colors p-2 hover:bg-gray-100 rounded-lg"
+            >
+              <Bell size={20} />
+              {unreadCount > 0 && (
+                <span className="absolute top-0 right-0 bg-red-600 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {/* Notification Dropdown */}
+            {notificationOpen && (
+              <NotificationDropdown
+                notifications={notifications}
+                onClose={() => setNotificationOpen(false)}
+                onMarkRead={handleMarkRead}
+              />
+            )}
+          </div>
+
           <span className="text-sm text-gray-500">{currentUser || 'User'}</span>
           <button
             onClick={handleLogout}
@@ -125,6 +192,23 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
           >
             Upload
           </button>
+
+          {/* Mobile Notification Bell */}
+          <button
+            onClick={() => {
+              setNotificationOpen(!notificationOpen)
+              setMenuOpen(false)
+            }}
+            className="w-full flex items-center justify-between bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium transition"
+          >
+            Notifications
+            {unreadCount > 0 && (
+              <span className="bg-red-600 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
+
           <div className="text-sm text-gray-500">{currentUser || 'User'}</div>
           <button
             onClick={handleLogout}

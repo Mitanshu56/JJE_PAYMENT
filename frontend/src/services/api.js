@@ -162,6 +162,11 @@ export const paymentRemindersAPI = {
   sendMultiple: (payload) => api.post('/api/payment-reminders/send-multiple', payload),
   getHistory: (limit=100) => api.get(`/api/payment-reminders/history?limit=${limit}`),
   getHistoryByParty: (partyName, limit=100) => api.get(`/api/payment-reminders/history/${encodeURIComponent(partyName)}?limit=${limit}`),
+  stopInvoice: (invoiceNo, partyName) => {
+    if (partyName) return api.patch('/api/payment-reminders/stop', { invoiceId: invoiceNo, partyName })
+    return api.patch(`/api/payment-reminders/stop/${encodeURIComponent(invoiceNo)}`)
+  },
+  deleteHistoryByParty: (partyName, password) => api.delete(`/api/payment-reminders/history/${encodeURIComponent(partyName)}`, { data: { password } }),
 }
 
 export default api
