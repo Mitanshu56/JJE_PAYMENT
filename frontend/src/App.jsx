@@ -132,6 +132,7 @@ function App() {
         onLogout={handleLogout}
         onNavigate={handleHeaderNavigate}
         currentUser={currentUser}
+        currentRole={currentRole}
         activeTab={activeTab}
         refreshKey={fiscalYearsVersion}
       />

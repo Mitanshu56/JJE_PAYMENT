@@ -5,13 +5,15 @@ import { getSelectedFiscalYear } from '../utils/fiscal'
 import notificationsAPI from '../services/notificationsAPI'
 import NotificationDropdown from './NotificationDropdown'
 
-export default function Header({ onUploadClick, onLogout, onNavigate, currentUser, activeTab = 'summary', refreshKey = 0 }) {
+export default function Header({ onUploadClick, onLogout, onNavigate, currentUser, currentRole = 'user', activeTab = 'summary', refreshKey = 0 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [selectedFY, setSelectedFY] = useState(() => getSelectedFiscalYear())
+  const [fiscalYears, setFiscalYears] = useState([])
   const [notificationOpen, setNotificationOpen] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [loadingNotifications, setLoadingNotifications] = useState(false)
+  const isAdmin = currentRole === 'admin'
 
   // Load notifications
   const loadNotifications = async () => {
@@ -43,10 +45,21 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
       try {
         const res = await fiscalAPI.listYears()
         const list = (res?.data?.data || []).map((d) => d.value).filter(Boolean)
-        const storedFY = getSelectedFiscalYear() || ''
-        const nextFY = list.includes(storedFY) ? storedFY : (storedFY || list[0] || 'FY-2025-2026')
-        setSelectedFY(nextFY)
-        localStorage.setItem('selected_fiscal_year', nextFY)
+        setFiscalYears(list)
+        
+        if (isAdmin) {
+          // For admin: load from adminSelectedFY, fall back to first FY
+          const adminSelectedFY = localStorage.getItem('adminSelectedFY')
+          const nextFY = list.includes(adminSelectedFY) ? adminSelectedFY : (list[0] || 'FY-2025-2026')
+          setSelectedFY(nextFY)
+          localStorage.setItem('adminSelectedFY', nextFY)
+        } else {
+          // For normal users: load from selected_fiscal_year
+          const storedFY = getSelectedFiscalYear() || ''
+          const nextFY = list.includes(storedFY) ? storedFY : (list[0] || 'FY-2025-2026')
+          setSelectedFY(nextFY)
+          localStorage.setItem('selected_fiscal_year', nextFY)
+        }
       } catch (err) {
         // ignore
       }
@@ -54,7 +67,7 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
     load()
     // Load notifications on mount
     loadNotifications()
-  }, [refreshKey])
+  }, [refreshKey, isAdmin])
 
   useEffect(() => {
     const handleFYChange = (event) => {
@@ -103,6 +116,13 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
     setMenuOpen(false)
   }
 
+  const handleAdminFYChange = (newFY) => {
+    setSelectedFY(newFY)
+    localStorage.setItem('adminSelectedFY', newFY)
+    // Emit event to trigger dashboard reload
+    window.dispatchEvent(new CustomEvent('admin-fiscal-year-changed', { detail: newFY }))
+  }
+
   return (
     <header className="bg-white shadow-md">
       <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
@@ -114,9 +134,25 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
         </div>
 
         <nav className="hidden md:flex items-center gap-6">
-          <span className="border border-gray-200 rounded-md px-3 py-1.5 text-sm text-gray-700 bg-gray-50">
-            {selectedFY || 'No FY selected'}
-          </span>
+          {isAdmin ? (
+            // Admin: FY selector dropdown
+            <select
+              value={selectedFY}
+              onChange={(e) => handleAdminFYChange(e.target.value)}
+              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm text-gray-700 bg-white hover:border-gray-400 focus:border-blue-500 focus:outline-none transition"
+            >
+              {fiscalYears.map((fy) => (
+                <option key={fy} value={fy}>
+                  {fy}
+                </option>
+              ))}
+            </select>
+          ) : (
+            // Normal user: FY display only
+            <span className="border border-gray-200 rounded-md px-3 py-1.5 text-sm text-gray-700 bg-gray-50">
+              {selectedFY || 'No FY selected'}
+            </span>
+          )}
           <button type="button" onClick={() => handleNavigate('summary')} className={navClass('summary')}>
             Dashboard
           </button>
@@ -174,9 +210,25 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
 
       {menuOpen && (
         <div className="md:hidden border-t border-gray-200 p-4 space-y-3">
-          <div className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700 bg-gray-50">
-            {selectedFY || 'No FY selected'}
-          </div>
+          {isAdmin ? (
+            // Admin: FY selector dropdown for mobile
+            <select
+              value={selectedFY}
+              onChange={(e) => handleAdminFYChange(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-700 bg-white hover:border-gray-400 focus:border-blue-500 focus:outline-none transition"
+            >
+              {fiscalYears.map((fy) => (
+                <option key={fy} value={fy}>
+                  {fy}
+                </option>
+              ))}
+            </select>
+          ) : (
+            // Normal user: FY display only for mobile
+            <div className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700 bg-gray-50">
+              {selectedFY || 'No FY selected'}
+            </div>
+          )}
           <button type="button" onClick={() => handleNavigate('summary')} className={navClass('summary', true)}>
             Dashboard
           </button>

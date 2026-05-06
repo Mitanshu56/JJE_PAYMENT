@@ -24,7 +24,9 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`
   }
   // Attach selected fiscal year if present
-  const selectedFY = getSelectedFiscalYear()
+  // For admin: use adminSelectedFY if available, for normal users: use selected_fiscal_year
+  const adminSelectedFY = localStorage.getItem('adminSelectedFY')
+  const selectedFY = adminSelectedFY || getSelectedFiscalYear()
   if (selectedFY) {
     config.headers = config.headers || {}
     config.headers['X-Fiscal-Year'] = selectedFY

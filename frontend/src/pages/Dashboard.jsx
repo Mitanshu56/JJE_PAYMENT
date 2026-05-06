@@ -54,6 +54,18 @@ const Dashboard = forwardRef(function Dashboard({ onActiveTabChange, currentRole
   }, [currentFY])
 
   useEffect(() => {
+    const handleAdminFYChange = (event) => {
+      const nextFY = event?.detail
+      if (nextFY && nextFY !== currentFY) {
+        setCurrentFY(nextFY)
+      }
+    }
+
+    window.addEventListener('admin-fiscal-year-changed', handleAdminFYChange)
+    return () => window.removeEventListener('admin-fiscal-year-changed', handleAdminFYChange)
+  }, [currentFY])
+
+  useEffect(() => {
     if (!currentFY) return
     setSummary(null)
     setPartySummary(null)

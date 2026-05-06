@@ -31,6 +31,26 @@ def _month_key_from_invoice_date(value) -> str:
         return ''
 
 
+def _get_allowed_fiscal_year(request: Request) -> str | None:
+    """
+    Get fiscal year for this request.
+    Only admin users can use custom FY from header.
+    Normal users always get default/current FY.
+    """
+    if not request:
+        return None
+    
+    user_role = getattr(request.state, 'role', 'user')
+    
+    # Admin can use custom FY from header
+    if user_role == 'admin':
+        return getattr(request.state, 'fiscal_year', None)
+    
+    # Normal users: ignore custom FY header, use default
+    from app.core.fiscal import current_fiscal_year_label
+    return current_fiscal_year_label()
+
+
 @router.post("/match-payments")
 async def match_payments(db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
     """
@@ -38,7 +58,7 @@ async def match_payments(db: AsyncIOMotorDatabase = Depends(get_db), request: Re
     Updates bill statuses based on matches. Scoped to selected fiscal if present.
     """
     try:
-        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+        fiscal = _get_allowed_fiscal_year(request)
         bill_controller = BillController(db)
         payment_controller = PaymentController(db)
         
@@ -90,7 +110,7 @@ async def get_dashboard_summary(
 ):
     """Get dashboard summary statistics (scoped to fiscal if present)"""
     try:
-        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+        fiscal = _get_allowed_fiscal_year(request)
         bill_controller = BillController(db)
         payment_controller = PaymentController(db)
         
@@ -184,7 +204,7 @@ async def get_dashboard_summary(
 async def get_party_summary(latest_upload_only: bool = False, db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
     """Get party-wise payment summary (scoped to fiscal if present)"""
     try:
-        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+        fiscal = _get_allowed_fiscal_year(request)
         bill_controller = BillController(db)
         
         # Determine filters
@@ -216,7 +236,7 @@ async def get_party_summary(latest_upload_only: bool = False, db: AsyncIOMotorDa
 async def get_monthly_summary(latest_upload_only: bool = False, db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
     """Get monthly payment summary (scoped to fiscal if present)"""
     try:
-        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+        fiscal = _get_allowed_fiscal_year(request)
         bill_controller = BillController(db)
         
         # Determine filters
