@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { paymentRemindersAPI } from '../services/api'
+import { useAdminFY } from '../context/AdminFYContext'
+import { getSelectedFiscalYear, setSelectedFiscalYear } from '../utils/fiscal'
 
 const REMINDER_DAYS_OPTIONS = [20, 30, 45]
 
@@ -52,7 +54,9 @@ function getNextReminderLabel(row) {
   return 'Next Reminder Scheduled'
 }
 
-function PaymentReminder() {
+function PaymentReminder({ currentRole = 'user' }) {
+  const { adminSelectedFY, isAdmin: isAdminFromContext } = useAdminFY()
+  const isAdmin = currentRole === 'admin' || Boolean(isAdminFromContext)
   const [parties, setParties] = useState([])
   const [search, setSearch] = useState('')
   const [selectedPartyName, setSelectedPartyName] = useState('')
@@ -78,6 +82,33 @@ function PaymentReminder() {
     loadParties()
     loadHistory()
   }, [])
+
+  useEffect(() => {
+    if (isAdmin && adminSelectedFY && adminSelectedFY !== getSelectedFiscalYear()) {
+      setSelectedFiscalYear(adminSelectedFY)
+    }
+  }, [isAdmin, adminSelectedFY])
+
+  useEffect(() => {
+    const handleAdminFYChange = async (event) => {
+      if (isAdmin && event?.detail?.fy) {
+        const nextFiscalYear = event.detail.fy
+        setSelectedFiscalYear(nextFiscalYear)
+
+        await loadParties()
+        if (selectedPartyName) {
+          await loadParty(selectedPartyName)
+          await loadHistory(selectedPartyName)
+        } else {
+          await loadHistory()
+        }
+      }
+    }
+
+    window.addEventListener('admin-fy-changed', handleAdminFYChange)
+    return () => window.removeEventListener('admin-fy-changed', handleAdminFYChange)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, selectedPartyName])
 
   const filteredParties = useMemo(() => {
     const term = search.trim().toLowerCase()

@@ -9,16 +9,21 @@ import notificationsAPI from '../services/notificationsAPI'
 export default function NotificationDropdown({ notifications, onClose, onMarkRead }) {
   const [loadingId, setLoadingId] = useState(null)
 
+  const unreadNotifications = (notifications || []).filter((notification) => !notification.isRead)
+
   const handleMarkAsRead = async (notificationId, isCurrentlyRead) => {
     try {
       setLoadingId(notificationId)
       if (!isCurrentlyRead) {
         await notificationsAPI.markAsRead(notificationId)
+        if (onMarkRead) {
+          onMarkRead('read', notificationId)
+        }
       } else {
         await notificationsAPI.markAsUnread(notificationId)
-      }
-      if (onMarkRead) {
-        onMarkRead()
+        if (onMarkRead) {
+          onMarkRead('unread', notificationId)
+        }
       }
     } catch (err) {
       console.error('Error updating notification:', err)
@@ -32,7 +37,7 @@ export default function NotificationDropdown({ notifications, onClose, onMarkRea
       setLoadingId(notificationId)
       await notificationsAPI.deleteNotification(notificationId)
       if (onMarkRead) {
-        onMarkRead()
+        onMarkRead('delete', notificationId)
       }
     } catch (err) {
       console.error('Error deleting notification:', err)
@@ -56,9 +61,9 @@ export default function NotificationDropdown({ notifications, onClose, onMarkRea
 
       {/* Notifications List */}
       <div className="flex-1 overflow-y-auto">
-        {notifications && notifications.length > 0 ? (
+        {unreadNotifications.length > 0 ? (
           <div className="divide-y divide-slate-200">
-            {notifications.map((notification) => (
+            {unreadNotifications.map((notification) => (
               <div
                 key={notification._id}
                 className={`p-4 hover:bg-slate-50 transition-colors ${

@@ -1,33 +1,53 @@
-import React, { useEffect, useState } from 'react'
-import { Menu, X, Bell } from 'lucide-react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { Bell, ChevronDown, Menu, X } from 'lucide-react'
 import { fiscalAPI } from '../services/api'
-import { getSelectedFiscalYear } from '../utils/fiscal'
 import notificationsAPI from '../services/notificationsAPI'
 import NotificationDropdown from './NotificationDropdown'
+import { getSelectedFiscalYear, setSelectedFiscalYear } from '../utils/fiscal'
+import { useAdminFY } from '../context/AdminFYContext'
 
-export default function Header({ onUploadClick, onLogout, onNavigate, currentUser, currentRole = 'user', activeTab = 'summary', refreshKey = 0 }) {
+export default function Header({
+  onUploadClick,
+  onLogout,
+  onNavigate,
+  currentUser,
+  activeTab = 'summary',
+  refreshKey = 0,
+  currentRole = 'user',
+}) {
+  const isAdminUser = currentRole === 'admin'
+  const { adminSelectedFY, setAdminSelectedFY } = useAdminFY()
+
   const [menuOpen, setMenuOpen] = useState(false)
-  const [selectedFY, setSelectedFY] = useState(() => getSelectedFiscalYear())
-  const [fiscalYears, setFiscalYears] = useState([])
+  const [availableFYs, setAvailableFYs] = useState([])
+  const [fyDropdownOpen, setFyDropdownOpen] = useState(false)
+  const [displayFY, setDisplayFY] = useState(getSelectedFiscalYear() || 'FY-2025-2026')
+
   const [notificationOpen, setNotificationOpen] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [loadingNotifications, setLoadingNotifications] = useState(false)
-  const isAdmin = currentRole === 'admin'
 
-  // Load notifications
+  const fyDropdownRef = useRef(null)
+  const notificationRef = useRef(null)
+
+  const effectiveFY = useMemo(() => {
+    if (isAdminUser) {
+      return adminSelectedFY || displayFY
+    }
+    return displayFY
+  }, [isAdminUser, adminSelectedFY, displayFY])
+
   const loadNotifications = async () => {
     try {
       setLoadingNotifications(true)
-      const res = await notificationsAPI.getNotifications(0, 20)
-      const countRes = await notificationsAPI.getUnreadCount()
-      
-      if (res?.data?.notifications) {
-        setNotifications(res.data.notifications)
-      }
-      if (countRes?.data?.unread_count !== undefined) {
-        setUnreadCount(countRes.data.unread_count)
-      }
+      const [notificationsRes, unreadRes] = await Promise.all([
+        notificationsAPI.getNotifications(0, 20, true),
+        notificationsAPI.getUnreadCount(),
+      ])
+
+      setNotifications(notificationsRes?.data?.notifications || [])
+      setUnreadCount(unreadRes?.data?.unread_count || 0)
     } catch (err) {
       console.error('Error loading notifications:', err)
     } finally {
@@ -35,69 +55,109 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
     }
   }
 
-  const handleMarkRead = () => {
-    // Reload notifications when one is marked read
-    loadNotifications()
+  const refreshUnreadCount = async () => {
+    try {
+      const countRes = await notificationsAPI.getUnreadCount()
+      setUnreadCount(countRes?.data?.unread_count || 0)
+    } catch (err) {
+      console.error('Error refreshing unread count:', err)
+    }
+  }
+
+  const handleNotificationAction = async (action, notificationId) => {
+    if (!notificationId) return
+
+    if (action === 'read' || action === 'delete') {
+      setNotifications((prev) => prev.filter((n) => n._id !== notificationId))
+    }
+
+    await refreshUnreadCount()
+  }
+
+  const handleAdminFYChange = (nextFY) => {
+    if (!isAdminUser || !nextFY) return
+
+    setDisplayFY(nextFY)
+    setSelectedFiscalYear(nextFY)
+    setAdminSelectedFY(nextFY)
+    window.dispatchEvent(new CustomEvent('selected-fiscal-year-changed', { detail: nextFY }))
+    setFyDropdownOpen(false)
+    setMenuOpen(false)
   }
 
   useEffect(() => {
-    const load = async () => {
+    let mounted = true
+
+    const loadFYs = async () => {
       try {
         const res = await fiscalAPI.listYears()
-        const list = (res?.data?.data || []).map((d) => d.value).filter(Boolean)
-        setFiscalYears(list)
-        
-        if (isAdmin) {
-          // For admin: load from adminSelectedFY, fall back to first FY
-          const adminSelectedFY = localStorage.getItem('adminSelectedFY')
-          const nextFY = list.includes(adminSelectedFY) ? adminSelectedFY : (list[0] || 'FY-2025-2026')
-          setSelectedFY(nextFY)
-          localStorage.setItem('adminSelectedFY', nextFY)
+        const list = (res?.data?.data || []).map((item) => item?.value).filter(Boolean)
+        if (!mounted) return
+
+        setAvailableFYs(list)
+
+        if (isAdminUser) {
+          const nextFY = adminSelectedFY || list[0] || getSelectedFiscalYear() || 'FY-2025-2026'
+          setDisplayFY(nextFY)
+          if (nextFY !== adminSelectedFY) {
+            setAdminSelectedFY(nextFY)
+          }
+          setSelectedFiscalYear(nextFY)
         } else {
-          // For normal users: load from selected_fiscal_year
-          const storedFY = getSelectedFiscalYear() || ''
-          const nextFY = list.includes(storedFY) ? storedFY : (list[0] || 'FY-2025-2026')
-          setSelectedFY(nextFY)
-          localStorage.setItem('selected_fiscal_year', nextFY)
+          const userFY = getSelectedFiscalYear() || list[0] || 'FY-2025-2026'
+          setDisplayFY(userFY)
         }
       } catch (err) {
-        // ignore
+        console.error('Error loading financial years:', err)
       }
     }
-    load()
-    // Load notifications on mount
+
+    loadFYs()
     loadNotifications()
-  }, [refreshKey, isAdmin])
+
+    return () => {
+      mounted = false
+    }
+  }, [refreshKey, isAdminUser, adminSelectedFY, setAdminSelectedFY])
 
   useEffect(() => {
-    const handleFYChange = (event) => {
+    const handleFiscalYearChange = (event) => {
+      if (isAdminUser) return
       const nextFY = event?.detail || getSelectedFiscalYear()
       if (nextFY) {
-        setSelectedFY(nextFY)
-        localStorage.setItem('selected_fiscal_year', nextFY)
+        setDisplayFY(nextFY)
       }
     }
 
-    window.addEventListener('selected-fiscal-year-changed', handleFYChange)
-    return () => window.removeEventListener('selected-fiscal-year-changed', handleFYChange)
+    window.addEventListener('selected-fiscal-year-changed', handleFiscalYearChange)
+    return () => window.removeEventListener('selected-fiscal-year-changed', handleFiscalYearChange)
+  }, [isAdminUser])
+
+  useEffect(() => {
+    const closeOutside = (event) => {
+      if (fyDropdownRef.current && !fyDropdownRef.current.contains(event.target)) {
+        setFyDropdownOpen(false)
+      }
+      if (notificationRef.current && !notificationRef.current.contains(event.target)) {
+        setNotificationOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', closeOutside)
+    return () => document.removeEventListener('mousedown', closeOutside)
   }, [])
 
-  // Auto-refresh notifications every 45 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       loadNotifications()
     }, 45000)
-    
+
     return () => clearInterval(interval)
   }, [])
 
   const navClass = (tab, mobile = false) => {
-    const base = mobile
-      ? 'block w-full text-left font-medium'
-      : 'font-medium'
-    const tone = activeTab === tab
-      ? 'text-blue-700'
-      : 'text-gray-600 hover:text-gray-900'
+    const base = mobile ? 'block w-full text-left font-medium' : 'font-medium'
+    const tone = activeTab === tab ? 'text-blue-700' : 'text-gray-600 hover:text-gray-900'
     return `${base} ${tone}`
   }
 
@@ -114,13 +174,53 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
   const handleLogout = () => {
     onLogout?.()
     setMenuOpen(false)
+    setFyDropdownOpen(false)
+    setNotificationOpen(false)
   }
 
-  const handleAdminFYChange = (newFY) => {
-    setSelectedFY(newFY)
-    localStorage.setItem('adminSelectedFY', newFY)
-    // Emit event to trigger dashboard reload
-    window.dispatchEvent(new CustomEvent('admin-fiscal-year-changed', { detail: newFY }))
+  const renderFYControl = (mobile = false) => {
+    if (isAdminUser) {
+      return (
+        <div ref={mobile ? undefined : fyDropdownRef} className={mobile ? 'w-full' : 'relative'}>
+          <button
+            type="button"
+            onClick={() => setFyDropdownOpen((value) => !value)}
+            className={mobile
+              ? 'w-full flex items-center justify-between border border-blue-200 rounded-md px-3 py-2 text-sm text-blue-800 bg-blue-50'
+              : 'flex items-center gap-2 border border-blue-200 rounded-md px-3 py-1.5 text-sm text-blue-800 bg-blue-50'}
+          >
+            <span>{effectiveFY || 'Select FY'}</span>
+            <ChevronDown size={16} />
+          </button>
+
+          {fyDropdownOpen && (
+            <div className={mobile
+              ? 'mt-2 w-full bg-white border border-gray-200 rounded-md shadow-lg z-30'
+              : 'absolute top-full mt-2 right-0 min-w-52 bg-white border border-gray-200 rounded-md shadow-lg z-30'}>
+              {(availableFYs.length ? availableFYs : [effectiveFY]).filter(Boolean).map((fy) => (
+                <button
+                  key={fy}
+                  type="button"
+                  onClick={() => handleAdminFYChange(fy)}
+                  className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${fy === effectiveFY ? 'bg-blue-50 text-blue-800 font-medium' : 'text-gray-700'}`}
+                >
+                  {fy}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    return (
+      <span className={mobile
+        ? 'w-full block border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700 bg-gray-50'
+        : 'border border-gray-200 rounded-md px-3 py-1.5 text-sm text-gray-700 bg-gray-50'}
+      >
+        {effectiveFY || 'No FY selected'}
+      </span>
+    )
   }
 
   return (
@@ -134,25 +234,8 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
         </div>
 
         <nav className="hidden md:flex items-center gap-6">
-          {isAdmin ? (
-            // Admin: FY selector dropdown
-            <select
-              value={selectedFY}
-              onChange={(e) => handleAdminFYChange(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm text-gray-700 bg-white hover:border-gray-400 focus:border-blue-500 focus:outline-none transition"
-            >
-              {fiscalYears.map((fy) => (
-                <option key={fy} value={fy}>
-                  {fy}
-                </option>
-              ))}
-            </select>
-          ) : (
-            // Normal user: FY display only
-            <span className="border border-gray-200 rounded-md px-3 py-1.5 text-sm text-gray-700 bg-gray-50">
-              {selectedFY || 'No FY selected'}
-            </span>
-          )}
+          {renderFYControl(false)}
+
           <button type="button" onClick={() => handleNavigate('summary')} className={navClass('summary')}>
             Dashboard
           </button>
@@ -162,6 +245,7 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
           <button type="button" onClick={() => handleNavigate('manage-payments')} className={navClass('manage-payments')}>
             Payments
           </button>
+
           <button
             onClick={handleUpload}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition"
@@ -169,11 +253,11 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
             Upload
           </button>
 
-          {/* Notification Bell */}
-          <div className="relative">
+          <div ref={notificationRef} className="relative">
             <button
-              onClick={() => setNotificationOpen(!notificationOpen)}
+              onClick={() => setNotificationOpen((value) => !value)}
               className="relative text-gray-600 hover:text-gray-900 transition-colors p-2 hover:bg-gray-100 rounded-lg"
+              title={loadingNotifications ? 'Refreshing notifications...' : 'Notifications'}
             >
               <Bell size={20} />
               {unreadCount > 0 && (
@@ -183,12 +267,11 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
               )}
             </button>
 
-            {/* Notification Dropdown */}
             {notificationOpen && (
               <NotificationDropdown
                 notifications={notifications}
                 onClose={() => setNotificationOpen(false)}
-                onMarkRead={handleMarkRead}
+                onMarkRead={handleNotificationAction}
               />
             )}
           </div>
@@ -202,33 +285,15 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
           </button>
         </nav>
 
-        {/* Mobile Menu */}
-        <button className="md:hidden" onClick={() => setMenuOpen(!menuOpen)}>
+        <button className="md:hidden" onClick={() => setMenuOpen((value) => !value)}>
           {menuOpen ? <X size={24} /> : <Menu size={24} />}
         </button>
       </div>
 
       {menuOpen && (
         <div className="md:hidden border-t border-gray-200 p-4 space-y-3">
-          {isAdmin ? (
-            // Admin: FY selector dropdown for mobile
-            <select
-              value={selectedFY}
-              onChange={(e) => handleAdminFYChange(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-700 bg-white hover:border-gray-400 focus:border-blue-500 focus:outline-none transition"
-            >
-              {fiscalYears.map((fy) => (
-                <option key={fy} value={fy}>
-                  {fy}
-                </option>
-              ))}
-            </select>
-          ) : (
-            // Normal user: FY display only for mobile
-            <div className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700 bg-gray-50">
-              {selectedFY || 'No FY selected'}
-            </div>
-          )}
+          {renderFYControl(true)}
+
           <button type="button" onClick={() => handleNavigate('summary')} className={navClass('summary', true)}>
             Dashboard
           </button>
@@ -238,6 +303,7 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
           <button type="button" onClick={() => handleNavigate('manage-payments')} className={navClass('manage-payments', true)}>
             Payments
           </button>
+
           <button
             onClick={handleUpload}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition"
@@ -245,10 +311,9 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
             Upload
           </button>
 
-          {/* Mobile Notification Bell */}
           <button
             onClick={() => {
-              setNotificationOpen(!notificationOpen)
+              setNotificationOpen((value) => !value)
               setMenuOpen(false)
             }}
             className="w-full flex items-center justify-between bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium transition"
@@ -261,7 +326,7 @@ export default function Header({ onUploadClick, onLogout, onNavigate, currentUse
             )}
           </button>
 
-          <div className="text-sm text-gray-500">{currentUser || 'User'}</div>
+          <span className="block text-sm text-gray-500">{currentUser || 'User'}</span>
           <button
             onClick={handleLogout}
             className="w-full border border-gray-300 hover:bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium transition"

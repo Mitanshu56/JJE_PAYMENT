@@ -16,6 +16,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/payments", tags=["Payments"])
 
 
+def _resolve_effective_fiscal_year(request: Request = None, fy: Optional[str] = None) -> Optional[str]:
+    state_fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+    role = getattr(request.state, 'role', 'user') if request is not None else 'user'
+
+    if role == 'admin' and fy and fy.strip():
+        return fy.strip()
+    return state_fiscal
+
+
+def _with_fy_filter(filters: Optional[dict], fiscal: Optional[str]) -> dict:
+    query = dict(filters or {})
+    if not fiscal:
+        return query
+    fy_clause = {'$or': [{'fiscal_year': fiscal}, {'financialYear': fiscal}]}
+    if '$and' in query and isinstance(query['$and'], list):
+        query['$and'].append(fy_clause)
+    else:
+        query['$and'] = [fy_clause]
+    return query
+
+
 async def reconcile_bills_from_payments(db: AsyncIOMotorDatabase, fiscal_year: Optional[str] = None) -> dict:
     """Rebuild bill paid/remaining/status from current payments collection.
     If `fiscal_year` is provided, operations are constrained to that fiscal only.
@@ -355,20 +376,23 @@ async def get_payments(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     party: Optional[str] = None,
+    fy: Optional[str] = Query(None),
     db: AsyncIOMotorDatabase = Depends(get_db),
     request: Request = None,
 ):
     """Get all payments with optional filters (scoped to fiscal if selected)"""
     try:
-        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+        fiscal = _resolve_effective_fiscal_year(request, fy)
         controller = PaymentController(db)
         filters = {}
         
         if party:
             filters['party_name'] = {'$regex': party, '$options': 'i'}
+
+        filters = _with_fy_filter(filters, fiscal)
         
-        payments = await controller.get_payments(filters, skip, limit, fiscal_year=fiscal)
-        total = await controller.count_payments(filters, fiscal_year=fiscal)
+        payments = await controller.get_payments(filters, skip, limit)
+        total = await controller.count_payments(filters)
         
         # Convert ObjectId to string
         for payment in payments:
@@ -392,12 +416,19 @@ async def get_payments(
 
 
 @router.get("/{payment_id}")
-async def get_payment(payment_id: str, db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
+async def get_payment(
+    payment_id: str,
+    fy: Optional[str] = Query(None),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    request: Request = None,
+):
     """Get a specific payment by ID (scoped to fiscal if selected)"""
     try:
-        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+        fiscal = _resolve_effective_fiscal_year(request, fy)
         controller = PaymentController(db)
-        payment = await controller.get_payment(payment_id, fiscal_year=fiscal)
+        filters = _with_fy_filter({'payment_id': payment_id}, fiscal)
+        payments = await controller.get_payments(filters=filters, skip=0, limit=1)
+        payment = payments[0] if payments else None
         
         if not payment:
             raise HTTPException(status_code=404, detail="Payment not found")
@@ -420,12 +451,18 @@ async def get_payment(payment_id: str, db: AsyncIOMotorDatabase = Depends(get_db
 
 
 @router.get("/party/{party_name}")
-async def get_payments_by_party(party_name: str, db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
+async def get_payments_by_party(
+    party_name: str,
+    fy: Optional[str] = Query(None),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    request: Request = None,
+):
     """Get all payments for a specific party (scoped to fiscal if selected)"""
     try:
-        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+        fiscal = _resolve_effective_fiscal_year(request, fy)
         controller = PaymentController(db)
-        payments = await controller.get_payments_by_party(party_name, fiscal_year=fiscal)
+        filters = _with_fy_filter({'party_name': party_name}, fiscal)
+        payments = await controller.get_payments(filters=filters, skip=0, limit=100000)
         
         # Convert ObjectId to string
         for payment in payments:

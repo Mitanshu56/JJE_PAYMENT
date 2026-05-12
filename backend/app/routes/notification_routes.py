@@ -21,6 +21,8 @@ def _normalize_notification(notification):
         notification['createdAt'] = notification['createdAt'].isoformat() if hasattr(notification['createdAt'], 'isoformat') else str(notification['createdAt'])
     if notification.get('updatedAt'):
         notification['updatedAt'] = notification['updatedAt'].isoformat() if hasattr(notification['updatedAt'], 'isoformat') else str(notification['updatedAt'])
+    if notification.get('readAt'):
+        notification['readAt'] = notification['readAt'].isoformat() if hasattr(notification['readAt'], 'isoformat') else str(notification['readAt'])
     
     return notification
 
@@ -29,16 +31,18 @@ def _normalize_notification(notification):
 async def get_notifications(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    unreadOnly: bool = Query(True),
     db: AsyncIOMotorDatabase = Depends(get_db)
 ):
     """Get all payment notifications (newest first)."""
     try:
+        query = {'isRead': False} if unreadOnly else {}
         notifications = await db['payment_reply_notifications'].find(
-            {}
+            query
         ).sort('replyReceivedAt', -1).skip(skip).limit(limit).to_list(limit)
         
         normalized = [_normalize_notification(n) for n in notifications]
-        total = await db['payment_reply_notifications'].count_documents({})
+        total = await db['payment_reply_notifications'].count_documents(query)
         
         return {
             'status': 'success',
@@ -75,7 +79,7 @@ async def mark_as_read(notification_id: str, db: AsyncIOMotorDatabase = Depends(
         
         result = await db['payment_reply_notifications'].update_one(
             {'_id': obj_id},
-            {'$set': {'isRead': True, 'updatedAt': datetime.utcnow()}}
+            {'$set': {'isRead': True, 'readAt': datetime.utcnow(), 'updatedAt': datetime.utcnow()}}
         )
         
         if result.matched_count == 0:
@@ -148,3 +152,9 @@ async def delete_notification(notification_id: str, db: AsyncIOMotorDatabase = D
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch('/read/{notification_id}')
+async def mark_as_read_alias(notification_id: str, db: AsyncIOMotorDatabase = Depends(get_db)):
+    """Compatibility alias for marking notification as read."""
+    return await mark_as_read(notification_id, db)

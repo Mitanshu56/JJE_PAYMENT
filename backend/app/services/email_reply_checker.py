@@ -81,6 +81,77 @@ class EmailReplyChecker:
         except Exception as exc:
             logger.warning(f'Could not load known party emails: {exc}')
         return emails
+
+    async def _seed_processed_replies(self, db: AsyncIOMotorDatabase):
+        """Backfill processed reply markers from existing notifications."""
+        try:
+            async for doc in db['payment_reply_notifications'].find({}, {'gmailMessageId': 1, 'threadId': 1, 'createdAt': 1}):
+                gmail_message_id = (doc.get('gmailMessageId') or '').strip()
+                thread_id = (doc.get('threadId') or '').strip()
+                if not gmail_message_id and not thread_id:
+                    continue
+
+                filters = []
+                if gmail_message_id:
+                    filters.append({'gmailMessageId': gmail_message_id})
+                if thread_id:
+                    filters.append({'threadId': thread_id})
+
+                if not filters:
+                    continue
+
+                await db['processed_email_replies'].update_one(
+                    {'$or': filters},
+                    {
+                        '$setOnInsert': {
+                            'gmailMessageId': gmail_message_id or None,
+                            'threadId': thread_id or None,
+                            'processedAt': doc.get('createdAt') or datetime.utcnow(),
+                        }
+                    },
+                    upsert=True,
+                )
+        except Exception as exc:
+            logger.warning(f'Could not seed processed replies: {exc}')
+
+    async def _is_reply_already_processed(self, db: AsyncIOMotorDatabase, gmail_message_id: str, thread_id: str) -> bool:
+        """Check whether a reply has already been processed."""
+        query = {}
+        conditions = []
+        if gmail_message_id:
+            conditions.append({'gmailMessageId': gmail_message_id})
+        if thread_id:
+            conditions.append({'threadId': thread_id})
+
+        if not conditions:
+            return False
+
+        query['$or'] = conditions
+        existing = await db['processed_email_replies'].find_one(query)
+        return existing is not None
+
+    async def _mark_reply_processed(self, db: AsyncIOMotorDatabase, gmail_message_id: str, thread_id: str):
+        """Persist a processed reply marker so cron runs stay idempotent."""
+        filters = []
+        if gmail_message_id:
+            filters.append({'gmailMessageId': gmail_message_id})
+        if thread_id:
+            filters.append({'threadId': thread_id})
+
+        if not filters:
+            return
+
+        await db['processed_email_replies'].update_one(
+            {'$or': filters},
+            {
+                '$set': {
+                    'gmailMessageId': gmail_message_id or None,
+                    'threadId': thread_id or None,
+                    'processedAt': datetime.utcnow(),
+                }
+            },
+            upsert=True,
+        )
     
     def _extract_snippet(self, body, max_length=200):
         """Extract first 200 chars of email body as snippet."""
@@ -192,6 +263,8 @@ class EmailReplyChecker:
             
             # Select inbox
             imap.select('INBOX')
+
+            await self._seed_processed_replies(db)
             
             status, messages = imap.search(None, 'ALL')
             if status != 'OK' or not messages or not messages[0]:
@@ -220,6 +293,7 @@ class EmailReplyChecker:
                     subject = self._decode_header(msg.get('Subject', ''))
                     message_id = (msg.get('Message-ID', '') or '').strip()
                     reply_date_str = msg.get('Date', '')
+                    thread_id = self._extract_thread_id(msg)
                     
                     # Ignore outbound/system emails and non-replies
                     if not from_email or from_email == self.email_user.lower():
@@ -227,6 +301,10 @@ class EmailReplyChecker:
                     if not self._is_reply_subject(subject) and not msg.get('In-Reply-To') and not msg.get('References'):
                         continue
                     if known_party_emails and from_email not in known_party_emails:
+                        continue
+
+                    if await self._is_reply_already_processed(db, message_id, thread_id):
+                        logger.info(f"Reply {message_id or thread_id} already processed, skipping")
                         continue
                     
                     # Get email body
@@ -287,13 +365,14 @@ class EmailReplyChecker:
                         'isRead': False,
                         'replyReceivedAt': reply_received_at,
                         'gmailMessageId': message_id,
-                        'threadId': self._extract_thread_id(msg),
+                        'threadId': thread_id,
                         'createdAt': datetime.utcnow(),
                         'updatedAt': datetime.utcnow(),
                     }
                     
                     # Insert notification
                     await db['payment_reply_notifications'].insert_one(notification)
+                    await self._mark_reply_processed(db, message_id, thread_id)
                     result['new_notifications'] += 1
                     
                     logger.info(f"✓ Created notification from {party_name} ({from_email}) for invoices {invoice_numbers}")

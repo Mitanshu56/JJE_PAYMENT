@@ -12,6 +12,7 @@ import PaymentReminder from './PaymentReminder'
 import { fiscalAPI } from '../services/api'
 import { getSelectedFiscalYear } from '../utils/fiscal'
 import '../components/dashboard/Dashboard.css'
+import { useAdminFY } from '../context/AdminFYContext'
 
 function buildNextFiscalYearLabel() {
   const now = new Date()
@@ -21,6 +22,9 @@ function buildNextFiscalYearLabel() {
 }
 
 const Dashboard = forwardRef(function Dashboard({ onActiveTabChange, currentRole = 'user', onFiscalYearsChanged }, ref) {
+  const { adminSelectedFY } = useAdminFY()
+  const isAdmin = currentRole === 'admin'
+
   const [summary, setSummary] = useState(null)
   const [partySummary, setPartySummary] = useState(null)
   const [monthlySummary, setMonthlySummary] = useState(null)
@@ -35,11 +39,34 @@ const Dashboard = forwardRef(function Dashboard({ onActiveTabChange, currentRole
   const [fiscalYearMessage, setFiscalYearMessage] = useState('')
   const [fiscalYearError, setFiscalYearError] = useState('')
   const [currentFY, setCurrentFY] = useState(() => getSelectedFiscalYear())
+  const [deleteFYTarget, setDeleteFYTarget] = useState('')
+  const [deleteFYPassword, setDeleteFYPassword] = useState('')
+  const [deletingFiscalYear, setDeletingFiscalYear] = useState(false)
 
   useEffect(() => {
     loadDashboardData()
     refreshFiscalYears()
   }, [])
+
+  useEffect(() => {
+    if (isAdmin && adminSelectedFY && adminSelectedFY !== currentFY) {
+      setCurrentFY(adminSelectedFY)
+    }
+  }, [isAdmin, adminSelectedFY, currentFY])
+
+  // Listen for admin FY changes and reload data
+  useEffect(() => {
+    const handleAdminFYChange = (event) => {
+      if (isAdmin && event?.detail?.fy) {
+        setCurrentFY(event.detail.fy)
+        // Refresh invoice token to trigger reload in child components
+        setInvoicesRefreshToken((prev) => prev + 1)
+      }
+    }
+
+    window.addEventListener('admin-fy-changed', handleAdminFYChange)
+    return () => window.removeEventListener('admin-fy-changed', handleAdminFYChange)
+  }, [isAdmin])
 
   useEffect(() => {
     const handleFYChange = (event) => {
@@ -51,18 +78,6 @@ const Dashboard = forwardRef(function Dashboard({ onActiveTabChange, currentRole
 
     window.addEventListener('selected-fiscal-year-changed', handleFYChange)
     return () => window.removeEventListener('selected-fiscal-year-changed', handleFYChange)
-  }, [currentFY])
-
-  useEffect(() => {
-    const handleAdminFYChange = (event) => {
-      const nextFY = event?.detail
-      if (nextFY && nextFY !== currentFY) {
-        setCurrentFY(nextFY)
-      }
-    }
-
-    window.addEventListener('admin-fiscal-year-changed', handleAdminFYChange)
-    return () => window.removeEventListener('admin-fiscal-year-changed', handleAdminFYChange)
   }, [currentFY])
 
   useEffect(() => {
@@ -78,6 +93,16 @@ const Dashboard = forwardRef(function Dashboard({ onActiveTabChange, currentRole
     onActiveTabChange?.(activeTab)
   }, [activeTab, onActiveTabChange])
 
+  // Keep dashboard views in sync across admin and normal users.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadDashboardData()
+      setInvoicesRefreshToken((prev) => prev + 1)
+    }, 30000)
+
+    return () => clearInterval(interval)
+  }, [currentFY, isAdmin])
+
   useImperativeHandle(ref, () => ({
     reload: async () => {
       await loadDashboardData()
@@ -92,11 +117,12 @@ const Dashboard = forwardRef(function Dashboard({ onActiveTabChange, currentRole
     try {
       setLoading(true)
       setError(null)
+      const fyParam = isAdmin ? currentFY : null
       const [summaryRes, partyRes, monthlyRes, billsRes] = await Promise.allSettled([
-        dashboardAPI.getSummary(),
-        dashboardAPI.getPartySummary(),
-        dashboardAPI.getMonthlySummary(),
-        billsAPI.getAll(0, 1000),
+        dashboardAPI.getSummary(fyParam),
+        dashboardAPI.getPartySummary(fyParam),
+        dashboardAPI.getMonthlySummary(fyParam),
+        billsAPI.getAll(0, 1000, null, null, null, fyParam),
       ])
 
       const errors = []
@@ -178,18 +204,29 @@ const Dashboard = forwardRef(function Dashboard({ onActiveTabChange, currentRole
     const fiscalValue = String(value || '').trim()
     if (!fiscalValue) return
 
-    // Ask admin to enter their password as confirmation
-    const password = window.prompt(`Enter admin password to remove fiscal year ${fiscalValue}`)
-    if (password === null) return // user cancelled
-    if (!password || !password.trim()) {
+    setFiscalYearError('')
+    setFiscalYearMessage('')
+    setDeleteFYTarget(fiscalValue)
+    setDeleteFYPassword('')
+  }
+
+  const confirmDeleteFiscalYear = async (event) => {
+    event?.preventDefault?.()
+
+    const fiscalValue = String(deleteFYTarget || '').trim()
+    const password = String(deleteFYPassword || '').trim()
+
+    if (!fiscalValue) return
+    if (!password) {
       setFiscalYearError('Admin password required')
       return
     }
 
     try {
+      setDeletingFiscalYear(true)
       setFiscalYearError('')
       setFiscalYearMessage('')
-      await fiscalAPI.deleteYear(fiscalValue, password.trim())
+      await fiscalAPI.deleteYear(fiscalValue, password)
 
       const res = await fiscalAPI.listYears()
       const remainingYears = (res?.data?.data || []).map((item) => item.value).filter(Boolean)
@@ -205,8 +242,12 @@ const Dashboard = forwardRef(function Dashboard({ onActiveTabChange, currentRole
       setFiscalYearMessage(`Removed ${fiscalValue}`)
       onFiscalYearsChanged?.()
       await loadDashboardData()
+      setDeleteFYTarget('')
+      setDeleteFYPassword('')
     } catch (err) {
       setFiscalYearError(err?.response?.data?.detail || 'Unable to remove fiscal year')
+    } finally {
+      setDeletingFiscalYear(false)
     }
   }
 
@@ -281,6 +322,54 @@ const Dashboard = forwardRef(function Dashboard({ onActiveTabChange, currentRole
             </div>
             {fiscalYearMessage && <div className="mt-3 text-sm text-green-700">{fiscalYearMessage}</div>}
             {fiscalYearError && <div className="mt-3 text-sm text-red-700">{fiscalYearError}</div>}
+          </div>
+        )}
+
+        {deleteFYTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+            <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200">
+              <div className="border-b border-slate-200 px-6 py-4">
+                <h3 className="text-lg font-semibold text-slate-900">Warning</h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  Removing fiscal year <span className="font-semibold text-slate-900">{deleteFYTarget}</span> will delete it from admin settings.
+                </p>
+              </div>
+
+              <form onSubmit={confirmDeleteFiscalYear} className="px-6 py-5 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Admin password</label>
+                  <input
+                    type="password"
+                    value={deleteFYPassword}
+                    onChange={(e) => setDeleteFYPassword(e.target.value)}
+                    autoFocus
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    placeholder="Enter admin password"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeleteFYTarget('')
+                      setDeleteFYPassword('')
+                    }}
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    disabled={deletingFiscalYear}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={deletingFiscalYear}
+                    className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:bg-red-300"
+                  >
+                    {deletingFiscalYear ? 'Removing...' : 'Remove FY'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
 

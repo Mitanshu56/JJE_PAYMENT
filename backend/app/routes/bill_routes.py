@@ -15,6 +15,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/bills", tags=["Bills"])
 
 
+def _resolve_effective_fiscal_year(request: Request = None, fy: Optional[str] = None) -> Optional[str]:
+    state_fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+    role = getattr(request.state, 'role', 'user') if request is not None else 'user'
+
+    if role == 'admin' and fy and fy.strip():
+        return fy.strip()
+    return state_fiscal
+
+
+def _with_fy_filter(filters: Optional[dict], fiscal: Optional[str]) -> dict:
+    query = dict(filters or {})
+    if not fiscal:
+        return query
+    fy_clause = {'$or': [{'fiscal_year': fiscal}, {'financialYear': fiscal}]}
+    if '$and' in query and isinstance(query['$and'], list):
+        query['$and'].append(fy_clause)
+    else:
+        query['$and'] = [fy_clause]
+    return query
+
+
 async def _cleanup_payment_links_after_bill_delete(db: AsyncIOMotorDatabase, bill_doc: dict) -> int:
     """Remove deleted bill references from payments and recalculate applied/unapplied values."""
     payment_collection = db['payments']
@@ -102,13 +123,14 @@ async def get_bills(
     month: Optional[int] = Query(None, ge=1, le=12),
     latest_upload_only: bool = Query(False),
     upload_batch_id: Optional[str] = None,
+    fy: Optional[str] = Query(None),
     request: Request = None,
     db: AsyncIOMotorDatabase = Depends(get_db)
 ):
     """Get all bills with optional filters"""
     try:
         controller = BillController(db)
-        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+        fiscal = _resolve_effective_fiscal_year(request, fy)
         filters = {}
         
         if status:
@@ -123,8 +145,9 @@ async def get_bills(
             effective_upload_batch_id = upload_batch_id
             filters['last_upload_batch_id'] = effective_upload_batch_id
         elif latest_upload_only:
+            upload_fiscal_filter = {'$or': [{'fiscal_year': fiscal}, {'financialYear': fiscal}]} if fiscal else {}
             latest_invoice_upload = await db['upload_logs'].find_one(
-                {'file_type': 'invoice'},
+                {'file_type': 'invoice', **upload_fiscal_filter},
                 sort=[('created_at', -1)]
             )
             latest_batch_id = (latest_invoice_upload or {}).get('upload_batch_id')
@@ -134,9 +157,11 @@ async def get_bills(
             else:
                 # If no batch metadata exists yet, keep backward-compatible behavior.
                 latest_upload_only = False
-        
-        bills = await controller.get_bills(filters, skip, limit, fiscal_year=fiscal)
-        total = await controller.count_bills(filters if not fiscal else {**filters, 'fiscal_year': fiscal})
+
+        filters = _with_fy_filter(filters, fiscal)
+
+        bills = await controller.get_bills(filters, skip, limit)
+        total = await controller.count_bills(filters)
         
         # Convert ObjectId to string
         for bill in bills:
@@ -160,12 +185,19 @@ async def get_bills(
 
 
 @router.get("/{invoice_no}")
-async def get_bill(invoice_no: str, request: Request = None, db: AsyncIOMotorDatabase = Depends(get_db)):
+async def get_bill(
+    invoice_no: str,
+    fy: Optional[str] = Query(None),
+    request: Request = None,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
     """Get a specific bill by invoice number"""
     try:
         controller = BillController(db)
-        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
-        bill = await controller.get_bill(invoice_no, fiscal_year=fiscal)
+        fiscal = _resolve_effective_fiscal_year(request, fy)
+        filters = _with_fy_filter({'invoice_no': str(invoice_no or '').strip()}, fiscal)
+        bills = await controller.get_bills(filters=filters, skip=0, limit=1)
+        bill = bills[0] if bills else None
 
         if not bill:
             raise HTTPException(status_code=404, detail="Bill not found")
@@ -187,12 +219,18 @@ async def get_bill(invoice_no: str, request: Request = None, db: AsyncIOMotorDat
 
 
 @router.get("/party/{party_name}")
-async def get_bills_by_party(party_name: str, request: Request = None, db: AsyncIOMotorDatabase = Depends(get_db)):
+async def get_bills_by_party(
+    party_name: str,
+    fy: Optional[str] = Query(None),
+    request: Request = None,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
     """Get all bills for a specific party"""
     try:
         controller = BillController(db)
-        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
-        bills = await controller.get_bills_by_party(party_name, fiscal_year=fiscal)
+        fiscal = _resolve_effective_fiscal_year(request, fy)
+        filters = _with_fy_filter({'party_name': party_name}, fiscal)
+        bills = await controller.get_bills(filters=filters, skip=0, limit=100000)
         
         # Convert ObjectId to string
         for bill in bills:

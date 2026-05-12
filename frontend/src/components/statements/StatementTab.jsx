@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { RefreshCw, Upload } from 'lucide-react'
 import { statementsAPI, uploadAPI } from '../../services/api'
+import { useAdminFY } from '../../context/AdminFYContext'
 
 const PAGE_SIZE = 12
 
@@ -22,7 +23,9 @@ function getFiscalLabel(fiscalYear) {
 
 import { getSelectedFiscalYear } from '../../utils/fiscal'
 
-export default function StatementTab() {
+export default function StatementTab({ currentRole = 'user' }) {
+  const { adminSelectedFY, isAdmin: isAdminFromContext } = useAdminFY()
+  const isAdmin = currentRole === 'admin' || Boolean(isAdminFromContext)
   const [months, setMonths] = useState([])
   const [activeMonthKey, setActiveMonthKey] = useState('')
   const [totalRows, setTotalRows] = useState(0)
@@ -87,6 +90,26 @@ export default function StatementTab() {
     window.addEventListener('selected-fiscal-year-changed', handleFiscalYearChange)
     return () => window.removeEventListener('selected-fiscal-year-changed', handleFiscalYearChange)
   }, [])
+
+  useEffect(() => {
+    const handleAdminFYChange = (event) => {
+      if (isAdmin && event?.detail?.fy) {
+        const nextFiscalYear = event.detail.fy
+        setFiscalYear(nextFiscalYear)
+        loadStatements(nextFiscalYear)
+      }
+    }
+
+    window.addEventListener('admin-fy-changed', handleAdminFYChange)
+    return () => window.removeEventListener('admin-fy-changed', handleAdminFYChange)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin])
+
+  useEffect(() => {
+    if (isAdmin && adminSelectedFY && adminSelectedFY !== fiscalYear) {
+      setFiscalYear(adminSelectedFY)
+    }
+  }, [isAdmin, adminSelectedFY, fiscalYear])
 
   const handlePdfUpload = async (e) => {
     const file = e.target.files?.[0]

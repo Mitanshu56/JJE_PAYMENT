@@ -24,9 +24,7 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`
   }
   // Attach selected fiscal year if present
-  // For admin: use adminSelectedFY if available, for normal users: use selected_fiscal_year
-  const adminSelectedFY = localStorage.getItem('adminSelectedFY')
-  const selectedFY = adminSelectedFY || getSelectedFiscalYear()
+  const selectedFY = getSelectedFiscalYear()
   if (selectedFY) {
     config.headers = config.headers || {}
     config.headers['X-Fiscal-Year'] = selectedFY
@@ -66,11 +64,13 @@ export const billsAPI = {
     status = null,
     party = null,
     month = null,
+    fy = null,
   ) => {
     const params = new URLSearchParams({ skip, limit })
     if (status) params.append('status', status)
     if (party) params.append('party', party)
     if (month) params.append('month', month)
+    if (fy) params.append('fy', fy)
     return api.get(`/api/bills/?${params}`)
   },
   getById: (invoiceNo) => api.get(`/api/bills/${invoiceNo}`),
@@ -81,9 +81,10 @@ export const billsAPI = {
 
 // Payments API
 export const paymentsAPI = {
-  getAll: (skip = 0, limit = 100, party = null) => {
+  getAll: (skip = 0, limit = 100, party = null, fy = null) => {
     const params = new URLSearchParams({ skip, limit })
     if (party) params.append('party', party)
+    if (fy) params.append('fy', fy)
     return api.get(`/api/payments/?${params}`)
   },
   getById: (paymentId) => api.get(`/api/payments/${paymentId}`),
@@ -150,9 +151,24 @@ export const statementsAPI = {
 
 // Dashboard API
 export const dashboardAPI = {
-  getSummary: () => api.get('/api/dashboard/summary'),
-  getPartySummary: () => api.get('/api/dashboard/party-summary'),
-  getMonthlySummary: () => api.get('/api/dashboard/monthly-summary'),
+  getSummary: (fy = null) => {
+    const params = new URLSearchParams()
+    if (fy) params.append('fy', fy)
+    const query = params.toString()
+    return api.get(`/api/dashboard/summary${query ? `?${query}` : ''}`)
+  },
+  getPartySummary: (fy = null) => {
+    const params = new URLSearchParams()
+    if (fy) params.append('fy', fy)
+    const query = params.toString()
+    return api.get(`/api/dashboard/party-summary${query ? `?${query}` : ''}`)
+  },
+  getMonthlySummary: (fy = null) => {
+    const params = new URLSearchParams()
+    if (fy) params.append('fy', fy)
+    const query = params.toString()
+    return api.get(`/api/dashboard/monthly-summary${query ? `?${query}` : ''}`)
+  },
   matchPayments: () => api.post('/api/match-payments'),
 }
 

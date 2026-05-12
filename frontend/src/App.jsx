@@ -6,6 +6,7 @@ import FileUpload from './components/FileUpload'
 import Header from './components/Header'
 import { authAPI, authStorage } from './services/api'
 import './index.css'
+import { AdminFYProvider } from './context/AdminFYContext'
 
 function App() {
   const dashboardRef = useRef(null)
@@ -126,15 +127,16 @@ function App() {
   }
 
   return (
+    <AdminFYProvider isAdmin={currentRole === 'admin'}>
     <div className="min-h-screen bg-gray-50">
       <Header
         onUploadClick={handleUploadClick}
         onLogout={handleLogout}
         onNavigate={handleHeaderNavigate}
         currentUser={currentUser}
-        currentRole={currentRole}
         activeTab={activeTab}
         refreshKey={fiscalYearsVersion}
+        currentRole={currentRole}
       />
 
       <main className="max-w-7xl mx-auto p-4 md:p-6">
@@ -167,6 +169,7 @@ function App() {
         </div>
       </dialog>
     </div>
+    </AdminFYProvider>
   )
 }
 

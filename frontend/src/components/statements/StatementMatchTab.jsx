@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { statementsAPI } from '../../services/api'
 import { getSelectedFiscalYear } from '../../utils/fiscal'
+import { useAdminFY } from '../../context/AdminFYContext'
 
 const PAGE_SIZE = 200
 
@@ -74,7 +75,9 @@ function getGroupTone(isMatched) {
   }
 }
 
-export default function StatementMatchTab({ onDataChanged }) {
+export default function StatementMatchTab({ onDataChanged, currentRole = 'user' }) {
+  const { adminSelectedFY, isAdmin: isAdminFromContext } = useAdminFY()
+  const isAdmin = currentRole === 'admin' || Boolean(isAdminFromContext)
   const [rows, setRows] = useState([])
   const [summary, setSummary] = useState(null)
   const [filters, setFilters] = useState({ page: 1, pageSize: PAGE_SIZE })
@@ -219,6 +222,28 @@ export default function StatementMatchTab({ onDataChanged }) {
     window.addEventListener('selected-fiscal-year-changed', handleFiscalYearChange)
     return () => window.removeEventListener('selected-fiscal-year-changed', handleFiscalYearChange)
   }, [])
+
+  useEffect(() => {
+    const handleAdminFYChange = (event) => {
+      if (isAdmin && event?.detail?.fy) {
+        const nextFiscalYear = event.detail.fy
+        setFiscalYear(nextFiscalYear)
+        setFilters((prev) => ({ ...prev, page: 1 }))
+        loadRows({ ...filters, page: 1 }, nextFiscalYear)
+      }
+    }
+
+    window.addEventListener('admin-fy-changed', handleAdminFYChange)
+    return () => window.removeEventListener('admin-fy-changed', handleAdminFYChange)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin])
+
+  useEffect(() => {
+    if (isAdmin && adminSelectedFY && adminSelectedFY !== fiscalYear) {
+      setFiscalYear(adminSelectedFY)
+      setFilters((prev) => ({ ...prev, page: 1 }))
+    }
+  }, [isAdmin, adminSelectedFY, fiscalYear])
 
   const handleToggleInvoiceConfirm = async (group, invoice, checked) => {
     const groupKey = String(group?.key || '')

@@ -1,9 +1,10 @@
 """
 Matching and Dashboard API routes
 """
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from datetime import datetime
+from typing import Optional
 from app.core.database import get_db
 from app.controllers.bill_controller import BillController
 from app.controllers.payment_controller import PaymentController
@@ -15,6 +16,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Matching & Dashboard"])
 
 STANDARD_PAYMENT_MODES = ['CASH', 'CHEQUE', 'UPI', 'NEFT']
+
+
+def _resolve_effective_fiscal_year(request: Request = None, fy: Optional[str] = None) -> Optional[str]:
+    state_fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
+    role = getattr(request.state, 'role', 'user') if request is not None else 'user'
+
+    if role == 'admin' and fy and fy.strip():
+        return fy.strip()
+    return state_fiscal
+
+
+def _with_fy_filter(filters: Optional[dict], fiscal: Optional[str]) -> dict:
+    query = dict(filters or {})
+    if not fiscal:
+        return query
+    fy_clause = {'$or': [{'fiscal_year': fiscal}, {'financialYear': fiscal}]}
+    if '$and' in query and isinstance(query['$and'], list):
+        query['$and'].append(fy_clause)
+    else:
+        query['$and'] = [fy_clause]
+    return query
 
 
 def _normalize_payment_mode(mode: str | None) -> str:
@@ -31,26 +53,6 @@ def _month_key_from_invoice_date(value) -> str:
         return ''
 
 
-def _get_allowed_fiscal_year(request: Request) -> str | None:
-    """
-    Get fiscal year for this request.
-    Only admin users can use custom FY from header.
-    Normal users always get default/current FY.
-    """
-    if not request:
-        return None
-    
-    user_role = getattr(request.state, 'role', 'user')
-    
-    # Admin can use custom FY from header
-    if user_role == 'admin':
-        return getattr(request.state, 'fiscal_year', None)
-    
-    # Normal users: ignore custom FY header, use default
-    from app.core.fiscal import current_fiscal_year_label
-    return current_fiscal_year_label()
-
-
 @router.post("/match-payments")
 async def match_payments(db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
     """
@@ -58,7 +60,7 @@ async def match_payments(db: AsyncIOMotorDatabase = Depends(get_db), request: Re
     Updates bill statuses based on matches. Scoped to selected fiscal if present.
     """
     try:
-        fiscal = _get_allowed_fiscal_year(request)
+        fiscal = getattr(request.state, 'fiscal_year', None) if request is not None else None
         bill_controller = BillController(db)
         payment_controller = PaymentController(db)
         
@@ -105,28 +107,31 @@ async def match_payments(db: AsyncIOMotorDatabase = Depends(get_db), request: Re
 @router.get("/dashboard/summary")
 async def get_dashboard_summary(
     latest_upload_only: bool = False,
+    fy: Optional[str] = Query(None),
     db: AsyncIOMotorDatabase = Depends(get_db),
     request: Request = None,
 ):
     """Get dashboard summary statistics (scoped to fiscal if present)"""
     try:
-        fiscal = _get_allowed_fiscal_year(request)
+        fiscal = _resolve_effective_fiscal_year(request, fy)
         bill_controller = BillController(db)
         payment_controller = PaymentController(db)
         
         # Determine filters
         filters = {}
         if latest_upload_only:
+            upload_fiscal_filter = {'$or': [{'fiscal_year': fiscal}, {'financialYear': fiscal}]} if fiscal else {}
             latest_invoice_upload = await db['upload_logs'].find_one(
-                {'file_type': 'invoice', **({'fiscal_year': fiscal} if fiscal else {})},
+                {'file_type': 'invoice', **upload_fiscal_filter},
                 sort=[('created_at', -1)]
             )
             latest_batch_id = (latest_invoice_upload or {}).get('upload_batch_id')
             if latest_batch_id:
                 filters['last_upload_batch_id'] = latest_batch_id
+        filters = _with_fy_filter(filters, fiscal)
         
         # Get bills (optionally filtered to latest upload)
-        bills = await bill_controller.get_bills(filters=filters, limit=10000, fiscal_year=fiscal)
+        bills = await bill_controller.get_bills(filters=filters, limit=10000)
         
         # Calculate summary
         total_billing = sum(b.get('grand_total', 0) for b in bills)
@@ -155,7 +160,8 @@ async def get_dashboard_summary(
         partial_invoices = len([b for b in bills if b.get('status') == 'PARTIAL'])
         unpaid_invoices = len([b for b in bills if b.get('status') == 'UNPAID'])
         
-        payments = await payment_controller.get_payments(limit=100000, fiscal_year=fiscal)
+        payment_filters = _with_fy_filter({}, fiscal)
+        payments = await payment_controller.get_payments(filters=payment_filters, limit=100000)
         payment_count = len(payments)
 
         received_by_mode = {mode: 0.0 for mode in STANDARD_PAYMENT_MODES}
@@ -201,24 +207,31 @@ async def get_dashboard_summary(
 
 
 @router.get("/dashboard/party-summary")
-async def get_party_summary(latest_upload_only: bool = False, db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
+async def get_party_summary(
+    latest_upload_only: bool = False,
+    fy: Optional[str] = Query(None),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    request: Request = None,
+):
     """Get party-wise payment summary (scoped to fiscal if present)"""
     try:
-        fiscal = _get_allowed_fiscal_year(request)
+        fiscal = _resolve_effective_fiscal_year(request, fy)
         bill_controller = BillController(db)
         
         # Determine filters
         filters = {}
         if latest_upload_only:
+            upload_fiscal_filter = {'$or': [{'fiscal_year': fiscal}, {'financialYear': fiscal}]} if fiscal else {}
             latest_invoice_upload = await db['upload_logs'].find_one(
-                {'file_type': 'invoice', **({'fiscal_year': fiscal} if fiscal else {})},
+                {'file_type': 'invoice', **upload_fiscal_filter},
                 sort=[('created_at', -1)]
             )
             latest_batch_id = (latest_invoice_upload or {}).get('upload_batch_id')
             if latest_batch_id:
                 filters['last_upload_batch_id'] = latest_batch_id
+        filters = _with_fy_filter(filters, fiscal)
         
-        bills = await bill_controller.get_bills(filters=filters, limit=10000, fiscal_year=fiscal)
+        bills = await bill_controller.get_bills(filters=filters, limit=10000)
         
         matcher = PaymentMatcher()
         party_stats = matcher.get_party_summary(bills)
@@ -233,24 +246,31 @@ async def get_party_summary(latest_upload_only: bool = False, db: AsyncIOMotorDa
 
 
 @router.get("/dashboard/monthly-summary")
-async def get_monthly_summary(latest_upload_only: bool = False, db: AsyncIOMotorDatabase = Depends(get_db), request: Request = None):
+async def get_monthly_summary(
+    latest_upload_only: bool = False,
+    fy: Optional[str] = Query(None),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    request: Request = None,
+):
     """Get monthly payment summary (scoped to fiscal if present)"""
     try:
-        fiscal = _get_allowed_fiscal_year(request)
+        fiscal = _resolve_effective_fiscal_year(request, fy)
         bill_controller = BillController(db)
         
         # Determine filters
         filters = {}
         if latest_upload_only:
+            upload_fiscal_filter = {'$or': [{'fiscal_year': fiscal}, {'financialYear': fiscal}]} if fiscal else {}
             latest_invoice_upload = await db['upload_logs'].find_one(
-                {'file_type': 'invoice', **({'fiscal_year': fiscal} if fiscal else {})},
+                {'file_type': 'invoice', **upload_fiscal_filter},
                 sort=[('created_at', -1)]
             )
             latest_batch_id = (latest_invoice_upload or {}).get('upload_batch_id')
             if latest_batch_id:
                 filters['last_upload_batch_id'] = latest_batch_id
+        filters = _with_fy_filter(filters, fiscal)
         
-        bills = await bill_controller.get_bills(filters=filters, limit=10000, fiscal_year=fiscal)
+        bills = await bill_controller.get_bills(filters=filters, limit=10000)
         
         matcher = PaymentMatcher()
         monthly_stats = matcher.get_monthly_summary(bills)

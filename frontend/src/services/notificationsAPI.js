@@ -8,9 +8,9 @@ const notificationsAPI = {
   /**
    * Get all payment notifications
    */
-  getNotifications: (skip = 0, limit = 50) =>
+  getNotifications: (skip = 0, limit = 50, unreadOnly = true) =>
     api.get('/api/payment-notifications', {
-      params: { skip, limit }
+      params: { skip, limit, unreadOnly }
     }),
 
   /**
@@ -23,7 +23,7 @@ const notificationsAPI = {
    * Mark notification as read
    */
   markAsRead: (notificationId) =>
-    api.patch(`/api/payment-notifications/${notificationId}/read`),
+    api.patch(`/api/payment-notifications/read/${notificationId}`),
 
   /**
    * Mark notification as unread
