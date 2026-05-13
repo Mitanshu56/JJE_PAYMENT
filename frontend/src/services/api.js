@@ -1,7 +1,8 @@
 import axios from 'axios'
 import { getSelectedFiscalYear } from '../utils/fiscal'
 
-const API_BASE_URL = 'http://localhost:8000'
+// Read API base from Vite env variable (set `VITE_API_BASE_URL` in deployment)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 const AUTH_TOKEN_KEY = 'jje_auth_token'
 
 const api = axios.create({
