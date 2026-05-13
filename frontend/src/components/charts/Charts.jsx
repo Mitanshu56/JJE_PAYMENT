@@ -119,27 +119,30 @@ export default function Charts({ monthlySummary = [] }) {
 
         .charts-root {
           font-family: 'DM Sans', sans-serif;
-          background: ${COLORS.bg};
-          padding: 24px;
+          background: linear-gradient(135deg, #fafbfc 0%, #f3f4f6 100%);
+          padding: 28px;
           min-height: 100vh;
         }
 
         .charts-header {
-          margin-bottom: 24px;
+          margin-bottom: 28px;
+          padding-bottom: 16px;
+          border-bottom: 2px solid #f3f4f6;
         }
 
         .charts-title {
-          font-size: 22px;
-          font-weight: 700;
-          color: ${COLORS.ink};
-          letter-spacing: -0.5px;
-          margin: 0 0 4px;
+          font-size: 26px;
+          font-weight: 800;
+          color: #0f0f0f;
+          letter-spacing: -0.6px;
+          margin: 0 0 6px;
         }
 
         .charts-subtitle {
-          font-size: 13px;
-          color: ${COLORS.muted};
+          font-size: 14px;
+          color: #6b7280;
           margin: 0;
+          font-weight: 500;
         }
 
         .tabs {
@@ -174,53 +177,96 @@ export default function Charts({ monthlySummary = [] }) {
 
         .kpi-row {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-          gap: 12px;
-          margin-bottom: 20px;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 18px;
+          margin-bottom: 28px;
         }
 
         .kpi-card {
-          background: #fff;
-          border: 1px solid ${COLORS.border};
-          border-radius: 14px;
-          padding: 16px;
-          transition: box-shadow 0.2s ease;
+          background: linear-gradient(135deg, #ffffff 0%, #fafbfc 100%);
+          border: 1px solid #e5e7eb;
+          border-radius: 18px;
+          padding: 24px;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          position: relative;
+          overflow: hidden;
+        }
+
+        .kpi-card::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 3px;
+          background: linear-gradient(90deg, #3b82f6, #10b981, #f43f5e);
+          opacity: 0;
+          transition: opacity 0.3s ease;
         }
 
         .kpi-card:hover {
-          box-shadow: 0 6px 20px rgba(0,0,0,0.06);
+          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.08);
+          transform: translateY(-4px);
+          border-color: #d1d5db;
+        }
+
+        .kpi-card:hover::before {
+          opacity: 1;
+        }
+
+        .kpi-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 12px;
+          gap: 12px;
+        }
+
+        .kpi-badge-icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 32px;
+          height: 32px;
+          border-radius: 10px;
+          font-size: 16px;
+          font-weight: 600;
+          flex-shrink: 0;
         }
 
         .kpi-label {
-          font-size: 11px;
-          font-weight: 500;
-          color: ${COLORS.muted};
+          font-size: 12px;
+          font-weight: 600;
+          color: #6b7280;
           text-transform: uppercase;
-          letter-spacing: 0.6px;
-          margin-bottom: 6px;
+          letter-spacing: 0.8px;
+          margin-bottom: 0;
         }
 
         .kpi-value {
-          font-size: 20px;
-          font-weight: 700;
-          color: ${COLORS.ink};
+          font-size: 28px;
+          font-weight: 800;
+          color: #1f2937;
           font-family: 'DM Mono', monospace;
-          letter-spacing: -0.5px;
+          letter-spacing: -0.8px;
+          margin: 12px 0 8px;
+          line-height: 1.2;
         }
 
         .kpi-sub {
-          font-size: 11px;
-          color: ${COLORS.muted};
-          margin-top: 2px;
+          font-size: 12px;
+          color: #9ca3af;
+          margin-top: 4px;
         }
 
         .kpi-badge {
           display: inline-block;
-          margin-top: 4px;
-          padding: 2px 7px;
+          margin-top: 8px;
+          padding: 6px 12px;
           border-radius: 99px;
-          font-size: 11px;
+          font-size: 12px;
           font-weight: 600;
+          letter-spacing: 0.3px;
         }
 
         .charts-grid {
@@ -229,23 +275,35 @@ export default function Charts({ monthlySummary = [] }) {
         }
 
         .charts-grid.two-col {
-          grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+          grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
         }
 
         .chart-card {
-          background: ${COLORS.card};
-          border: 1px solid ${COLORS.border};
-          border-radius: 16px;
-          padding: 20px;
-          transition: box-shadow 0.2s ease;
+          background: linear-gradient(135deg, #ffffff 0%, #fafbfc 100%);
+          border: 1px solid #e5e7eb;
+          border-radius: 18px;
+          padding: 28px;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          min-height: 420px;
+          display: flex;
+          flex-direction: column;
         }
 
         .chart-card:hover {
-          box-shadow: 0 8px 28px rgba(0,0,0,0.06);
+          box-shadow: 0 18px 48px rgba(0, 0, 0, 0.08);
+          border-color: #d1d5db;
         }
 
         .chart-card.wide {
           grid-column: 1 / -1;
+          min-height: 450px;
+        }
+        
+        .chart-card > div:last-child {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
 
         .divider {
@@ -288,24 +346,34 @@ export default function Charts({ monthlySummary = [] }) {
         {/* KPI Row */}
         <div className="kpi-row">
           <div className="kpi-card">
-            <div className="kpi-label">Total Billed</div>
-            <div className="kpi-value">₹{(totalBilled / 1000).toFixed(0)}K</div>
-            <div className="kpi-sub">Across {chartData.length} months</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Collected</div>
+            <div className="kpi-header">
+              <div className="kpi-label">Total Collected</div>
+              <div className="kpi-badge-icon" style={{ background: COLORS.paidLight, color: COLORS.paid }}>
+                ✓
+              </div>
+            </div>
             <div className="kpi-value" style={{ color: COLORS.paid }}>₹{(totalPaid / 1000).toFixed(0)}K</div>
-            <span className="kpi-badge" style={{ background: COLORS.paidLight, color: COLORS.paid }}>{collectionRate}% rate</span>
+            <span className="kpi-badge" style={{ background: COLORS.paidLight, color: COLORS.paid }}>{collectionRate}% collection rate</span>
           </div>
           <div className="kpi-card">
-            <div className="kpi-label">Pending</div>
+            <div className="kpi-header">
+              <div className="kpi-label">Outstanding</div>
+              <div className="kpi-badge-icon" style={{ background: COLORS.pendingLight, color: COLORS.pending }}>
+                ⚠
+              </div>
+            </div>
             <div className="kpi-value" style={{ color: COLORS.pending }}>₹{(totalPending / 1000).toFixed(0)}K</div>
-            <span className="kpi-badge" style={{ background: COLORS.pendingLight, color: COLORS.pending }}>Outstanding</span>
+            <span className="kpi-badge" style={{ background: COLORS.pendingLight, color: COLORS.pending }}>Pending resolution</span>
           </div>
           <div className="kpi-card">
-            <div className="kpi-label">Avg / Month</div>
-            <div className="kpi-value">₹{(totalBilled / chartData.length / 1000).toFixed(0)}K</div>
-            <div className="kpi-sub">Billing avg</div>
+            <div className="kpi-header">
+              <div className="kpi-label">Monthly Average</div>
+              <div className="kpi-badge-icon" style={{ background: '#e0e7ff', color: '#4f46e5' }}>
+                ⌚
+              </div>
+            </div>
+            <div className="kpi-value" style={{ color: '#4f46e5' }}>₹{(totalBilled / chartData.length / 1000).toFixed(0)}K</div>
+            <span className="kpi-badge" style={{ background: '#e0e7ff', color: '#4f46e5' }}>Per month billing</span>
           </div>
         </div>
 
@@ -331,7 +399,7 @@ export default function Charts({ monthlySummary = [] }) {
                   <StatPill label="Paid" value={totalPaid} color={COLORS.paid} bg={COLORS.paidLight} />,
                 ]}
               />
-              <ResponsiveContainer width="100%" height={240}>
+              <ResponsiveContainer width="100%" height={340}>
                 <AreaChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                   <defs>
                     <linearGradient id="gradBilled" x1="0" y1="0" x2="0" y2="1">
@@ -360,7 +428,7 @@ export default function Charts({ monthlySummary = [] }) {
             {/* Bar Chart */}
             <div className="chart-card">
               <CardHeader title="Monthly Breakdown" subtitle="Paid vs pending per month" />
-              <ResponsiveContainer width="100%" height={220}>
+              <ResponsiveContainer width="100%" height={310}>
                 <BarChart data={chartData} barSize={14} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
                   <XAxis dataKey="name" tick={{ fontSize: 12, fill: COLORS.muted }} axisLine={false} tickLine={false} />
@@ -379,10 +447,10 @@ export default function Charts({ monthlySummary = [] }) {
             {/* Radial + Pie */}
             <div className="chart-card">
               <CardHeader title="Collection Rate" subtitle="Overall payment status" />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, flex: 1 }}>
                 {/* Radial gauge */}
-                <div style={{ position: 'relative', width: 140, flexShrink: 0 }}>
-                  <ResponsiveContainer width={140} height={140}>
+                <div style={{ position: 'relative', width: 160, flexShrink: 0 }}>
+                  <ResponsiveContainer width={160} height={160}>
                     <RadialBarChart innerRadius="72%" outerRadius="100%" data={radialData} startAngle={200} endAngle={-20}>
                       <RadialBar background={{ fill: COLORS.border }} dataKey="value" cornerRadius={10} />
                     </RadialBarChart>
@@ -398,8 +466,8 @@ export default function Charts({ monthlySummary = [] }) {
                 </div>
 
                 {/* Pie breakdown */}
-                <div style={{ flex: 1 }}>
-                  <ResponsiveContainer width="100%" height={140}>
+                <div style={{ flex: 1, minWidth: 160 }}>
+                  <ResponsiveContainer width="100%" height={160}>
                     <PieChart>
                       <Pie
                         data={[
@@ -432,7 +500,7 @@ export default function Charts({ monthlySummary = [] }) {
           <div className="charts-grid two-col">
             <div className="chart-card wide">
               <CardHeader title="Billing vs Collection" subtitle="Month-by-month performance comparison" />
-              <ResponsiveContainer width="100%" height={280}>
+              <ResponsiveContainer width="100%" height={360}>
                 <BarChart data={chartData} barSize={18} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
                   <XAxis dataKey="name" tick={{ fontSize: 12, fill: COLORS.muted }} axisLine={false} tickLine={false} />
@@ -450,7 +518,7 @@ export default function Charts({ monthlySummary = [] }) {
 
             <div className="chart-card">
               <CardHeader title="Pending by Month" subtitle="Uncollected amounts" />
-              <ResponsiveContainer width="100%" height={220}>
+              <ResponsiveContainer width="100%" height={310}>
                 <BarChart data={chartData} barSize={16} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
                   <XAxis dataKey="name" tick={{ fontSize: 12, fill: COLORS.muted }} axisLine={false} tickLine={false} />
@@ -467,8 +535,8 @@ export default function Charts({ monthlySummary = [] }) {
 
             <div className="chart-card">
               <CardHeader title="Payment Split" subtitle="Overall paid vs pending" />
-              <div style={{ display: 'flex', justifyContent: 'center' }}>
-                <ResponsiveContainer width="100%" height={220}>
+              <div style={{ display: 'flex', justifyContent: 'center', flex: 1, alignItems: 'center' }}>
+                <ResponsiveContainer width="100%" height={290}>
                   <PieChart>
                     <Pie
                       data={[
@@ -496,9 +564,9 @@ export default function Charts({ monthlySummary = [] }) {
         {/* Trend Tab */}
         {activeTab === 'trend' && (
           <div className="charts-grid">
-            <div className="chart-card">
+            <div className="chart-card wide">
               <CardHeader title="Full Revenue Trend" subtitle="All metrics over time" />
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer width="100%" height={380}>
                 <AreaChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                   <defs>
                     <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
