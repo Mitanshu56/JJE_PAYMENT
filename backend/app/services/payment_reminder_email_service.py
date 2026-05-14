@@ -7,6 +7,19 @@ import smtplib
 
 
 def _send_email(subject: str, to_email: str, html: str, text: str) -> None:
+    """Send email using Gmail API if enabled, otherwise fall back to SMTP."""
+    
+    # Try Gmail API first if enabled
+    if settings.USE_GMAIL_API:
+        try:
+            from app.services.gmail_api_service import send_email_via_gmail_api
+            from_email = settings.GMAIL_SEND_FROM_EMAIL or settings.SMTP_USERNAME
+            send_email_via_gmail_api(subject, to_email, html, text, from_email)
+            return
+        except Exception as exc:
+            logger.warning(f"Gmail API send failed: {exc}. Falling back to SMTP.")
+    
+    # Fall back to SMTP
     smtp_username = (settings.SMTP_USERNAME or "").strip()
     smtp_password = (settings.SMTP_PASSWORD or "").replace(" ", "")
 

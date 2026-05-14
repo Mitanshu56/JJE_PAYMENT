@@ -52,6 +52,18 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM_EMAIL: str = ""
 
+    # Gmail API configuration (for sending emails on Render)
+    # Set USE_GMAIL_API=True to enable, False to use SMTP
+    USE_GMAIL_API: bool = False
+    # OAuth 2.0 user credentials (refresh token + client ID/secret)
+    GOOGLE_REFRESH_TOKEN: Optional[str] = None
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    GOOGLE_CLIENT_SECRET: Optional[str] = None
+    # Service account JSON (as a string) - alternative to OAuth
+    GOOGLE_SERVICE_ACCOUNT_JSON: Optional[str] = None
+    # Email address to send from (defaults to SMTP_USERNAME)
+    GMAIL_SEND_FROM_EMAIL: Optional[str] = None
+
     # Gmail reply inbox monitoring
     EMAIL_USER: Optional[str] = None
     EMAIL_PASS: Optional[str] = None
