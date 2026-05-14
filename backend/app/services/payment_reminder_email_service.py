@@ -7,9 +7,19 @@ import smtplib
 
 
 def _send_email(subject: str, to_email: str, html: str, text: str) -> None:
-    """Send email using Gmail API if enabled, otherwise fall back to SMTP."""
+    """Send email using Resend API first, then Gmail API, then fall back to SMTP."""
     
-    # Try Gmail API first if enabled
+    # Try Resend API first if enabled (simplest and most reliable)
+    if settings.USE_RESEND_API:
+        try:
+            from app.services.resend_api_service import send_email_via_resend
+            from_email = settings.GMAIL_SEND_FROM_EMAIL or settings.SMTP_USERNAME
+            send_email_via_resend(subject, to_email, html, text, from_email)
+            return
+        except Exception as exc:
+            logger.warning(f"Resend API send failed: {exc}. Falling back to Gmail API.")
+    
+    # Try Gmail API if enabled
     if settings.USE_GMAIL_API:
         try:
             from app.services.gmail_api_service import send_email_via_gmail_api

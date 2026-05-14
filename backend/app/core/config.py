@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     # Email address to send from (defaults to SMTP_USERNAME)
     GMAIL_SEND_FROM_EMAIL: Optional[str] = None
 
+    # Resend API configuration (simplest email solution for Render)
+    USE_RESEND_API: bool = False
+    RESEND_API_KEY: Optional[str] = None
+
     # Gmail reply inbox monitoring
     EMAIL_USER: Optional[str] = None
     EMAIL_PASS: Optional[str] = None
