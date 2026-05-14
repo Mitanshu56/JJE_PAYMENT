@@ -77,6 +77,7 @@ def _build_text_fallback(party_name: str, rows: list[dict], total_pending_amount
                 "This is a computer-generated payment reminder. If you have already made the payment, kindly ignore this email or contact us for confirmation.",
                 "",
                 "Thank you,",
+                "Jay Jalaram Electricals",
                 "Accounts Department",
         ])
         return "\n".join(lines)
@@ -215,6 +216,7 @@ def _build_html(party_name: str, rows: list[dict], total_pending_amount: float) 
 
                 <p class="email-text" style="font-size: 15px; color: #374151; margin-top: 22px;">
                     Thank you,<br/>
+                    <strong>Jay Jalaram Electricals</strong><br/>
                     <strong>Accounts Department</strong>
                 </p>
             </div>
