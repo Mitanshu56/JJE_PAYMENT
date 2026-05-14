@@ -2,6 +2,7 @@ from email.message import EmailMessage
 from datetime import datetime
 from typing import Any
 from app.core.config import settings, logger
+import ssl
 import smtplib
 
 
@@ -22,12 +23,31 @@ def _send_email(subject: str, to_email: str, html: str, text: str) -> None:
     msg.add_alternative(html, subtype="html")
 
     try:
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30) as server:
-            server.starttls()
-            server.login(smtp_username, smtp_password)
-            server.send_message(msg)
+        port = int(settings.SMTP_PORT)
+        if port == 465:
+            with smtplib.SMTP_SSL(settings.SMTP_HOST, port, timeout=30, context=ssl.create_default_context()) as server:
+                server.login(smtp_username, smtp_password)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(settings.SMTP_HOST, port, timeout=30) as server:
+                server.ehlo()
+                server.starttls(context=ssl.create_default_context())
+                server.ehlo()
+                server.login(smtp_username, smtp_password)
+                server.send_message(msg)
     except Exception as exc:
-        logger.error(f"Failed to send payment reminder email: {exc}")
+        logger.error(f"Failed to send payment reminder email via {settings.SMTP_HOST}:{settings.SMTP_PORT}: {exc}")
+
+        if int(settings.SMTP_PORT) != 465:
+            try:
+                with smtplib.SMTP_SSL(settings.SMTP_HOST, 465, timeout=30, context=ssl.create_default_context()) as server:
+                    server.login(smtp_username, smtp_password)
+                    server.send_message(msg)
+                return
+            except Exception as fallback_exc:
+                logger.error(f"Fallback SMTP_SSL send also failed via {settings.SMTP_HOST}:465: {fallback_exc}")
+                raise fallback_exc from exc
+
         raise
 
 
